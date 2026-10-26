@@ -21,6 +21,7 @@ concurrency:
 
 permissions:
   contents: read
+  issues: write
 
 jobs:
   deploy:
@@ -70,6 +71,17 @@ jobs:
           scp $SSHOPT /tmp/momenti-src.tar.gz "$HOST:/tmp/momenti-src.tar.gz"
           scp $SSHOPT ops/deploy/deploy-remote.sh "$HOST:/tmp/momenti-deploy.sh"
           ssh $SSHOPT "$HOST" "bash /tmp/momenti-deploy.sh"
+
+      # The server log is posted to a GitHub issue when a deploy fails, so it can be read from anywhere.
+      - name: Report the server log if the deploy failed
+        if: failure() && steps.secrets.outputs.ready == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          SSHOPT="-i $HOME/.ssh/deploy_key -o BatchMode=yes -o StrictHostKeyChecking=yes"
+          scp $SSHOPT "$HOST:/tmp/momenti-deploy.log" /tmp/momenti-deploy.log || echo "(log-u nuk u mor)" > /tmp/momenti-deploy.log
+          { echo "Deploy deshtoi per commit ${GITHUB_SHA::7}. Site-i live mbeti ne versionin e meparshem."; echo; echo '```'; tail -n 150 /tmp/momenti-deploy.log | sed -E 's/(KEY|SECRET|PASSWORD|TOKEN)=[^ ]+/\1=***/g'; echo '```'; } > /tmp/report.md
+          gh issue create --repo "$GITHUB_REPOSITORY" --title "Deploy failed: ${GITHUB_SHA::7}" --body-file /tmp/report.md
 
       - name: Remove SSH key
         if: always()
