@@ -6,6 +6,11 @@ name: Deploy to VPS
 on:
   push:
     branches: [main]
+    # Helper scripts for the PC and docs don't change the site: no deploy for them.
+    paths-ignore:
+      - "ops/local/**"
+      - "ops/github/**"
+      - "**/*.md"
   workflow_dispatch:
 
 concurrency:
