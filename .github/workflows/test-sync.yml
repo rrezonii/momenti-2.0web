@@ -1,0 +1,43 @@
+# Every push to the "test" branch shows up on test.momenti.info in ~20-40 s (next dev, no build).
+# Going live = merging "test" into "main" (that runs "Deploy to VPS").
+name: "Test site: sync"
+
+on:
+  push:
+    branches: [test]
+  workflow_dispatch:
+
+concurrency:
+  group: test-site
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      HOST: root@62.171.174.17
+    steps:
+      - uses: actions/checkout@v4
+      - name: Prepare SSH
+        env:
+          VPS_SSH_KEY: ${{ secrets.VPS_SSH_KEY }}
+          VPS_KNOWN_HOSTS: ${{ secrets.VPS_KNOWN_HOSTS }}
+        run: |
+          install -m 700 -d "$HOME/.ssh"
+          printf '%s\n' "$VPS_SSH_KEY" > "$HOME/.ssh/deploy_key"
+          chmod 600 "$HOME/.ssh/deploy_key"
+          printf '%s\n' "$VPS_KNOWN_HOSTS" > "$HOME/.ssh/known_hosts"
+      - name: Copy to test.momenti.info
+        run: |
+          git archive --format=tar.gz -o /tmp/momenti-test-src.tar.gz HEAD
+          SSHOPT="-i $HOME/.ssh/deploy_key -o BatchMode=yes -o ServerAliveInterval=30 -o StrictHostKeyChecking=yes"
+          scp $SSHOPT /tmp/momenti-test-src.tar.gz "$HOST:/tmp/momenti-test-src.tar.gz"
+          scp $SSHOPT ops/staging/sync-test-remote.sh "$HOST:/tmp/momenti-test-sync.sh"
+          ssh $SSHOPT "$HOST" "bash /tmp/momenti-test-sync.sh"
+      - name: Remove SSH key
+        if: always()
+        run: rm -f "$HOME/.ssh/deploy_key"

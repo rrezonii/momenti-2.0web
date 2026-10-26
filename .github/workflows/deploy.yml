@@ -10,6 +10,8 @@ on:
     paths-ignore:
       - "ops/local/**"
       - "ops/github/**"
+      - "ops/staging/**"
+      - ".github/**"
       - "**/*.md"
   workflow_dispatch:
 

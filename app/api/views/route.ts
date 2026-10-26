@@ -2,6 +2,8 @@ import { NextResponse } from "next/server";
 import { getRedis } from "@/lib/redis";
 
 export async function POST(request: Request) {
+  // Views on test.momenti.info must not change "Më të lexuarat" on the live site.
+  if (process.env.MOMENTI_STAGING === "1") return NextResponse.json({ success: true, skipped: "staging" });
   try {
     const body = await request.json();
     const articleId = Number(body.articleId);

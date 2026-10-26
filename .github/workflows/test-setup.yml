@@ -1,0 +1,45 @@
+# One-time setup of test.momenti.info (re-run it to refresh nginx/HTTPS/password). Actions → "Test site: setup" → Run workflow.
+name: "Test site: setup"
+
+on:
+  workflow_dispatch:
+
+concurrency:
+  group: test-site
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  setup:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      HOST: root@62.171.174.17
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: test
+      - name: Prepare SSH
+        env:
+          VPS_SSH_KEY: ${{ secrets.VPS_SSH_KEY }}
+          VPS_KNOWN_HOSTS: ${{ secrets.VPS_KNOWN_HOSTS }}
+        run: |
+          install -m 700 -d "$HOME/.ssh"
+          printf '%s\n' "$VPS_SSH_KEY" > "$HOME/.ssh/deploy_key"
+          chmod 600 "$HOME/.ssh/deploy_key"
+          printf '%s\n' "$VPS_KNOWN_HOSTS" > "$HOME/.ssh/known_hosts"
+      - name: Upload code and set up test.momenti.info
+        env:
+          TEST_SITE_PASSWORD: ${{ secrets.TEST_SITE_PASSWORD }}
+        run: |
+          git archive --format=tar.gz -o /tmp/momenti-test-src.tar.gz HEAD
+          SSHOPT="-i $HOME/.ssh/deploy_key -o BatchMode=yes -o ServerAliveInterval=30 -o StrictHostKeyChecking=yes"
+          scp $SSHOPT /tmp/momenti-test-src.tar.gz "$HOST:/tmp/momenti-test-src.tar.gz"
+          scp $SSHOPT ops/staging/setup-test-remote.sh "$HOST:/tmp/momenti-test-setup.sh"
+          # The password goes over stdin, never on a command line.
+          printf '%s\n' "$TEST_SITE_PASSWORD" | ssh $SSHOPT "$HOST" "bash /tmp/momenti-test-setup.sh"
+      - name: Remove SSH key
+        if: always()
+        run: rm -f "$HOME/.ssh/deploy_key"

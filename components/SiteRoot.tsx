@@ -85,7 +85,7 @@ export default function SiteRoot({
       lang={locale}
       className="h-full antialiased"
     >
-      {locale === "en" && (
+      {locale === "en" && process.env.MOMENTI_STAGING !== "1" && (
         <head>
           {/* Server-rendered so AdSense's crawler finds it; async keeps it non-blocking. */}
           <script
