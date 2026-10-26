@@ -57,3 +57,6 @@ next-env.d.ts
 /klan-rss/cache.*
 /ekonomia-rss/cache.*
 /data/
+# deploy key made by ops/github/setup-deploy-key.bat (goes only into GitHub secrets, never into the repo)
+/ops/github/deploy_key*
+/ops/github/known_hosts.txt

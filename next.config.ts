@@ -5,8 +5,9 @@ const nextConfig: NextConfig = {
   experimental: {
     inlineCss: true,
     webpackMemoryOptimizations: true,
-    cpus: 1,
-    staticGenerationMaxConcurrency: 2,
+    // The VPS has 4 cores / 8 GB: build with 3 workers (one left for the live site) - ~2x faster deploys.
+    cpus: 3,
+    staticGenerationMaxConcurrency: 6,
   },
   images: {
     qualities: [45, 60, 75],

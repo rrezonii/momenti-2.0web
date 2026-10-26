@@ -39,7 +39,7 @@ done < <(find "$STAGE" -type f -print0)
 find "$STAGE" -type f -name "*.cmp-skip" -delete 2>/dev/null
 echo "   Gjithsej skedare te ndryshuar/te rinj: $CHANGED"
 [ "$CONFLICTS" -eq 0 ] || fail "$CONFLICTS skedare jane me te rinj ne server se ne PC. Nuk i mbishkruaj pa i pare."
-[ "$CHANGED" -gt 0 ] || fail "asgje per te derguar - kodi ne server eshte i njejte"
+if [ "$CHANGED" -eq 0 ]; then echo; echo "=== Asgje e re: kodi ne server eshte i njejte. Site-i live nuk u prek."; rm -rf "$STAGE"; exit 0; fi
 
 echo "== 3/6 Kopje rezerve e kodit aktual -> $BACKUP"
 mkdir -p /var/backups
