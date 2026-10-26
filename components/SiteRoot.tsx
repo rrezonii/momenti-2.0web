@@ -95,7 +95,9 @@ export default function SiteRoot({
           />
         </head>
       )}
-      <body className="min-h-full flex flex-col">
+      {/* Browser extensions (translators, ad blockers…) add attributes to <body> before React
+          loads; suppressHydrationWarning only ignores those attribute differences on this tag. */}
+      <body className="min-h-full flex flex-col" suppressHydrationWarning>
         {/* Mobile browser bar / overscroll colour = header colour (burgundy theme). React hoists it into <head>. */}
         <meta name="theme-color" content="#340d13" />
         <GoogleAnalytics measurementId={gaMeasurementId} />
