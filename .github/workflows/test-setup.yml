@@ -10,6 +10,7 @@ concurrency:
 
 permissions:
   contents: read
+  issues: write
 
 jobs:
   setup:
@@ -40,6 +41,17 @@ jobs:
           scp $SSHOPT ops/staging/setup-test-remote.sh "$HOST:/tmp/momenti-test-setup.sh"
           # The password goes over stdin, never on a command line.
           printf '%s\n' "$TEST_SITE_PASSWORD" | ssh $SSHOPT "$HOST" "bash /tmp/momenti-test-setup.sh"
+      # Short summary (key NAMES only, never values) posted as an issue, readable from anywhere.
+      - name: Report setup summary
+        if: always()
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          SSHOPT="-i $HOME/.ssh/deploy_key -o BatchMode=yes -o StrictHostKeyChecking=yes"
+          scp $SSHOPT "$HOST:/tmp/momenti-test-setup.log" /tmp/setup.log || echo "(log-u nuk u mor)" > /tmp/setup.log
+          { echo "Test site setup (${{ job.status }}) per ${GITHUB_SHA::7}"; echo; echo '```'; grep -E "^==|celesat|DNS|HTTPS|certbot|GATI|DESHTOI|test /kycu|nginx" /tmp/setup.log | sed -E 's/=[^ ]{6,}/=***/g' | tail -n 60; echo '```'; } > /tmp/report.md
+          gh issue create --repo "$GITHUB_REPOSITORY" --title "Test site setup: ${{ job.status }}" --body-file /tmp/report.md || true
+
       - name: Remove SSH key
         if: always()
         run: rm -f "$HOME/.ssh/deploy_key"

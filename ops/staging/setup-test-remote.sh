@@ -33,7 +33,22 @@ fi
 rm -rf "$STAGE"
 
 echo "== 2/6 .env.local i testit (kopje e live-it, me ndryshimet e testit)"
-grep -vE '^(NEXT_PUBLIC_GA_ID|KFL_DRAFTS_DIR|MOMENTI_STAGING)=' "$LIVE/.env.local" > "$TEST/.env.local"
+# Live runs `next start`, which also reads .env.production and .env; `next dev` does not read
+# .env.production. Merge them in Next's priority order (.env.local > .env.production > .env),
+# first value wins, so the test gets every key the live site has (YouTube, WordPress, Pruna...).
+: > "$TEST/.env.local.tmp"
+for f in "$LIVE/.env.local" "$LIVE/.env.production.local" "$LIVE/.env.production" "$LIVE/.env"; do
+  [ -f "$f" ] || continue
+  while IFS= read -r line || [ -n "$line" ]; do
+    case "$line" in ''|\#*) continue;; esac
+    key=${line%%=*}
+    [[ "$key" =~ ^[A-Za-z_][A-Za-z0-9_]*$ ]] || continue
+    case "$key" in NEXT_PUBLIC_GA_ID|KFL_DRAFTS_DIR|MOMENTI_STAGING|NODE_ENV) continue;; esac
+    grep -q "^$key=" "$TEST/.env.local.tmp" || printf '%s\n' "$line" >> "$TEST/.env.local.tmp"
+  done < "$f"
+done
+mv "$TEST/.env.local.tmp" "$TEST/.env.local"
+echo "   celesat e kopjuar: $(grep -c '=' "$TEST/.env.local") (emrat: $(cut -d= -f1 "$TEST/.env.local" | tr '\n' ' '))"
 {
   echo ""
   echo "# --- test.momenti.info ---"
