@@ -9,6 +9,9 @@ const eslintConfig = defineConfig([
   globalIgnores([
     // Default ignores of eslint-config-next:
     ".next/**",
+    ".kfl-enhancer-venv/**",
+    ".kfl-esrgan-venv/**",
+    ".kfl-tmp/**",
     "out/**",
     "build/**",
     "next-env.d.ts",

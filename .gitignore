@@ -2,6 +2,10 @@
 
 # dependencies
 /node_modules
+/.kfl-enhancer-venv/
+/.kfl-esrgan-venv/
+/.kfl-tmp/
+/scripts/kfl-enhancer/weights/
 /.pnp
 .pnp.*
 .yarn/*
@@ -15,10 +19,12 @@
 
 # next.js
 /.next/
+/.next-release/
 /out/
 
 # production
 /build
+/data/kfl-drafts/
 
 # misc
 .DS_Store
@@ -32,6 +38,7 @@ yarn-error.log*
 
 # env files (can opt-in for committing if needed)
 .env*
+!.env.example
 
 # vercel
 .vercel
@@ -39,3 +46,14 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+/.next-*/
+
+# Momenti: never commit archives, logs, local caches or empty helper folders
+*.tar.gz
+*.zip
+/ops/deploy/*.log
+/ops/deploy/backup-files.txt
+/ops/deploy/backup-local-hash.txt
+/klan-rss/cache.*
+/ekonomia-rss/cache.*
+/data/

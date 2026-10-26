@@ -1,0 +1,238 @@
+/* =========================================================
+   BURGUNDY THEME (same palette as KFL) — test.
+   To switch it off: remove the `import "@/app/theme-burgundy.css"` line in components/SiteRoot.tsx.
+========================================================= */
+:root {
+  --momenti-bg: #340d13;
+  --momenti-bg-dark: #25090d;
+  --momenti-surface: #3a0f18;
+  --momenti-surface-2: #4a1520;
+  --momenti-border: #5e2633;
+  --momenti-text-muted: #d2bfbd;
+}
+
+/* Same colour as the header, so the area above the logo (mobile pull-to-refresh / overscroll) matches */
+html { background-color: #340d13; }
+
+body {
+  /* Safari on iPhone colours the status-bar area from this colour: keep it equal to the header. */
+  background-color: #340d13;
+  background-image:
+    radial-gradient(ellipse 90% 60% at 8% 0%, rgba(161, 40, 58, .30), transparent 60%),
+    radial-gradient(ellipse 70% 50% at 100% 12%, rgba(110, 26, 38, .25), transparent 55%),
+    linear-gradient(180deg, #471119 0%, #340d13 900px, #2c0b11 100%);
+  background-repeat: no-repeat;
+}
+
+/* Header, menu, ticker: KFL top bar look */
+/* Logo area and menu share one background, so the header reads as a single bar */
+.site-header { background: #340d13; }
+.header-top { background: transparent; }
+.main-navigation { background: transparent; border-color: rgba(205, 191, 189, .16); }
+.breaking-news { background: rgba(37, 9, 13, .7); }
+.breaking-news-label {
+  color: #f1d4d5;
+  background: linear-gradient(135deg, #5e1a26 0%, #471119 100%);
+  border-right: 1px solid rgba(214, 195, 193, .16);
+}
+.breaking-news-label .breaking-news-pulse { background: #e0485a; }
+.header-search, .header-search input { background: rgba(37, 9, 13, .8); }
+
+/* Sections sit on the burgundy page instead of grey blocks */
+.world-section { background: transparent; }
+/* Tone-on-tone bands: sections alternate between a lighter rose-wine and a deeper wine,
+   so they stay distinct without leaving the burgundy palette. */
+.politics-section, .technology-home-section {
+  background-image:
+    radial-gradient(ellipse 70% 80% at 50% 0%, rgba(214, 120, 120, .10), transparent 70%),
+    linear-gradient(180deg, transparent 0%, rgba(120, 30, 46, .38) 14%, rgba(120, 30, 46, .38) 86%, transparent 100%);
+}
+.sport-section, .magazine-section {
+  background-image:
+    linear-gradient(180deg, transparent 0%, rgba(14, 3, 6, .38) 14%, rgba(14, 3, 6, .38) 86%, transparent 100%);
+}
+.politics-section .section-heading h2, .sport-section .section-heading h2,
+.technology-home-section .section-heading h2, .magazine-section .section-heading h2 { letter-spacing: .01em; }
+
+/* Photo placeholders and small cards */
+.image-placeholder, .sidebar-latest-image, .sponsor-placeholder, .latest-news-image,
+.politics-main-image, .politics-small-image, .kosovo-image, .youtube-shorts-thumbnail,
+.focus-news-image, .world-2026-lead-photo, .world-2026-story-photo,
+.magazine-main-image, .magazine-small-image { background-color: #4a1520; }
+.sidebar-latest-item { background: rgba(37, 9, 13, .55); }
+.politics-main-card, .magazine-small-card { background: rgba(28, 6, 10, .42); }
+/* Side lists (photo + title rows) have no padding, so a filled box looks uneven: keep them clean on the page. */
+.politics-small-card, .health-home-small-card { background: transparent; }
+
+/* Footer */
+.site-footer { background: #22080c; border-color: rgba(205, 191, 189, .14); }
+
+/* "Të fundit" block at the bottom of every category page, and other inner pages */
+.world-latest-section { background: rgba(20, 4, 8, .32); border-color: rgba(205, 191, 189, .12); }
+.world-home-main-image, .world-home-small-image, .world-more-image, .world-latest-image,
+.category-featured-main-image, .category-side-image, .category-image, .news-card-image,
+.article-image, .article-inline-image, .article-related-image, .world-main-image, .world-small-image,
+.search-result-image { background-color: #4a1520; }
+.article-video-placeholder { background: #25090d; }
+.home-hero-grid > .right-column .sidebar-latest-item { background: rgba(37, 9, 13, .55); }
+.home-hero-grid > .right-column .sidebar-latest-image { background-color: #4a1520; }
+.magazine-main-card { background-color: rgba(28, 6, 10, .42); }
+.sport-home-main-card, .health-home-main-card, .technology-home-main-card { background-color: rgba(28, 6, 10, .42); }
+
+/* Mobile menu and mobile search */
+.mobile-navigation, .mobile-header-search { background: #3a0f18; }
+.mobile-navigation a:hover, .mobile-navigation a.active { background: #4a1520; }
+
+/* English edition */
+.english-site, .english-header { background: #340d13; }
+.english-story-image, .english-article-cover { background-color: #4a1520; }
+.english-empty-state { background: #3a0f18; }
+.english-footer { background: #22080c; }
+
+/* Dark fades at the bottom of photos (under the titles): burgundy instead of the old grey */
+.featured-column .featured-lead .image-placeholder::after {
+  background: linear-gradient(to bottom, transparent 0%, rgb(52 13 19 / 46%) 42%, rgb(52 13 19 / 94%) 100%);
+}
+.politics-main-image::after {
+  background: linear-gradient(180deg, transparent 0%, rgba(40, 9, 14, .78) 58%, #28090e 100%);
+}
+.world-2026-lead-photo::after {
+  background: linear-gradient(180deg, transparent 0%, rgb(40 9 14 / 70%) 50%, #28090e 100%);
+}
+.youtube-shorts-thumbnail::after {
+  background: linear-gradient(180deg, transparent 0%, rgba(40, 9, 14, .82) 100%);
+}
+.english-story-image::after {
+  background: linear-gradient(transparent, rgba(30, 6, 10, .85));
+}
+
+/* Article page (mobile): fade under the title on the main photo — burgundy instead of black */
+.article-image::after {
+  background: linear-gradient(to bottom, transparent 42%, rgb(52 13 19 / 55%) 67%, #340d13 100%);
+}
+
+/* "Më të lexuarat" — mobile design B (big numbers, editorial). Desktop keeps its compact column. */
+.trending-now, .trending-category { display: none; }
+.trending-text { min-width: 0; }
+@media (max-width: 768px) {
+  .trending-box, .right-column .trending-box {
+    padding: 26px 20px 8px;
+    border: 0;
+    border-radius: 0;
+    background:
+      radial-gradient(90% 50% at 100% 0%, rgba(161, 40, 58, .32), transparent 65%),
+      rgba(20, 4, 8, .22);
+    box-shadow: none;
+  }
+  .trending-box .section-heading, .right-column .trending-box .section-heading {
+    display: flex;
+    align-items: flex-end;
+    justify-content: space-between;
+    margin: 0;
+    padding-bottom: 14px;
+    border-bottom: 2px solid #ff5d6c;
+  }
+  .trending-box .section-heading .heading-mark { display: none; }
+  .trending-box .section-heading h2 {
+    margin: 0;
+    font-family: "Lato", Arial, sans-serif;
+    font-size: 26px;
+    font-weight: 900;
+    line-height: 1;
+    color: var(--momenti-text);
+  }
+
+  .trending-item, .right-column .trending-item, .right-column .trending-item:first-of-type {
+    display: flex;
+    align-items: flex-start;
+    gap: 16px;
+    margin: 0;
+    padding: 16px 0;
+    border: 0;
+    border-bottom: 1px solid rgba(205, 191, 189, .14);
+    border-radius: 0;
+    background: transparent;
+    box-shadow: none;
+  }
+  .trending-item:last-child, .right-column .trending-item:last-child { border-bottom: 0; }
+  .right-column .trending-item:hover { background: transparent; }
+
+  .trending-number, .right-column .trending-number {
+    flex: 0 0 46px;
+    width: 46px;
+    min-width: 46px;
+    height: auto;
+    padding: 0;
+    border: 0;
+    background: none;
+    font-size: 0;
+    line-height: 0;
+  }
+  .trending-number::before {
+    content: attr(data-rank);
+    display: block;
+    font-family: "Lato", Arial, sans-serif;
+    font-size: 40px;
+    font-weight: 900;
+    line-height: .9;
+    color: rgba(255, 180, 187, .6);
+  }
+  .trending-item:first-of-type .trending-number::before { font-size: 46px; color: #ff5d6c; }
+
+  .trending-text { display: flex; flex-direction: column; gap: 6px; }
+  .trending-item h3, .right-column .trending-item h3 {
+    margin: 0;
+    font-family: "Lato", Arial, sans-serif;
+    font-size: 15.5px;
+    font-weight: 700;
+    line-height: 1.26;
+    color: var(--momenti-text);
+    -webkit-line-clamp: unset;
+    display: block;
+    overflow: visible;
+  }
+  .trending-item:first-of-type h3 { font-size: 17px; font-weight: 900; line-height: 1.22; color: var(--momenti-text); }
+  .trending-category { display: block; font-size: 11.5px; color: #d9c3c0; }
+}
+
+/* "Më të lexuarat" — desktop: same B look, scaled to the narrow right column.
+   Sizes/paddings stay as before so the first homepage section keeps its height. */
+@media (min-width: 769px) {
+  .right-column .trending-box .section-heading {
+    display: flex;
+    align-items: flex-end;
+    margin-bottom: 0;
+    padding-bottom: 4px;
+    border-bottom: 2px solid #ff5d6c;
+  }
+  .right-column .trending-box .section-heading .heading-mark { display: none; }
+  .right-column .trending-box .section-heading h2 {
+    margin: 0;
+    font-family: "Lato", Arial, sans-serif;
+    font-size: 18px;
+    font-weight: 900;
+    line-height: 1.05;
+    color: var(--momenti-text);
+  }
+  .right-column .trending-item:first-of-type {
+    margin-inline: 0;
+    padding-inline: 0;
+    border-radius: 0;
+    box-shadow: none;
+  }
+  .right-column .trending-item:hover { background: transparent; }
+  .right-column .trending-item:hover h3 { color: #fff; }
+  .right-column .trending-number { font-size: 0; line-height: 0; padding-top: 0; }
+  .right-column .trending-number::before {
+    content: attr(data-rank);
+    display: block;
+    font-family: "Lato", Arial, sans-serif;
+    font-size: 22px;
+    font-weight: 900;
+    line-height: .95;
+    color: rgba(255, 180, 187, .6);
+  }
+  .right-column .trending-item:first-of-type .trending-number::before { color: #ff5d6c; }
+  .right-column .trending-item h3 { font-family: "Lato", Arial, sans-serif; color: var(--momenti-text); }
+  .right-column .trending-item:first-of-type h3 { font-weight: 900; }
+}

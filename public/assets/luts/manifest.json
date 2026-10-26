@@ -1,0 +1,16 @@
+{
+  "version": 4,
+  "colorSpace": "sRGB",
+  "presets": [
+    { "id": "natural", "name": "Film natyral · Rec.709", "file": "/assets/luts/standard_film.cube", "defaultIntensity": 30 },
+    { "id": "clean", "name": "Mbrojtje e dritave", "file": "/assets/luts/protect_highlights.cube", "defaultIntensity": 30 },
+    { "id": "news", "name": "Kontrast fotografik", "file": "/assets/luts/photo_contrast.cube", "defaultIntensity": 25 },
+    { "id": "classic-film", "name": "Film klasik", "file": "/assets/luts/classic_film.cube", "defaultIntensity": 20 },
+    { "id": "cool-haze", "name": "Ton i ftohtë i butë", "file": "/assets/luts/cool_haze.cube", "defaultIntensity": 20 },
+    { "id": "warm-correction", "name": "Balancim i ngrohtë", "file": "/assets/luts/warm_correction.cube", "defaultIntensity": 25 },
+    { "id": "sunlit", "name": "Dritë natyrale e ngrohtë", "file": "/assets/luts/sunlit_cinema.cube", "defaultIntensity": 15 },
+    { "id": "faded", "name": "Film i zbehur", "file": "/assets/luts/faded_memories.cube", "defaultIntensity": 15 },
+    { "id": "warm-pop", "name": "Ngjyra të ngrohta", "file": "/assets/luts/warm_pop.cube", "defaultIntensity": 15 },
+    { "id": "editorial-bw", "name": "B&W", "file": "/assets/luts/editorial_bw.cube", "defaultIntensity": 100 }
+  ]
+}
