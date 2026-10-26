@@ -7,6 +7,7 @@ import DesktopYouTubeEmbed from "@/components/DesktopYouTubeEmbed";
 import DeferredPromoVideo from "@/components/DeferredPromoVideo";
 import type { Article } from "@/lib/types";
 import { getTrendingArticleIds } from "@/lib/redis";
+import { getWordPressArticlesByIds } from "@/lib/api";
 import { getLatestYouTubeShorts } from "@/lib/youtube";
 
 const SHOW_YOUTUBE_TITLE = true;
@@ -58,7 +59,7 @@ async function YouTubeHeroContent({ locale }: { locale: "sq" | "en" }) {
 }
 
 export default async function HomeHero({ articles: latestPosts, locale = "sq" }: { articles: Article[]; locale?: "sq" | "en" }) {
-  const trendingIds = await getTrendingArticleIds(5);
+  const trendingIds = await getTrendingArticleIds(10); // extra ids: some may be English translations
 
   const featuredPosts = latestPosts.slice(0, 3);
   const focusPosts = latestPosts.slice(3, 4);
@@ -66,6 +67,21 @@ export default async function HomeHero({ articles: latestPosts, locale = "sq" }:
   const trendingMap = new Map(
     latestPosts.map((post) => [post.id, post])
   );
+
+  // The most-read articles are often older than the latest 20 shown here: fetch the
+  // missing ones by id so "Më të lexuarat" really shows the most read.
+  const missingTrendingIds = locale === "sq" ? trendingIds.filter((id) => !trendingMap.has(id)) : [];
+  if (missingTrendingIds.length) {
+    try {
+      for (const article of await getWordPressArticlesByIds(missingTrendingIds)) {
+        // Views of English translations are counted too; keep them out of the Albanian list.
+        if (article.terms?.some((term) => /^momenti-en/i.test(term))) continue;
+        trendingMap.set(article.id, article);
+      }
+    } catch {
+      // WordPress unavailable: fall back to the recent articles below.
+    }
+  }
 
   const rankedTrendingPosts = trendingIds
     .map((id) => trendingMap.get(id))

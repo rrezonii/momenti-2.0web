@@ -468,6 +468,18 @@ export async function getWordPressArticles(
   return posts.map(mapWordPressPostToArticle);
 }
 
+/** Articles by WordPress id, in the order given (missing/unpublished ids are skipped). */
+export async function getWordPressArticlesByIds(ids: number[]): Promise<Article[]> {
+  const wanted = [...new Set(ids.filter((id) => Number.isInteger(id) && id > 0))].slice(0, 20);
+  if (!WORDPRESS_URL || wanted.length === 0) return [];
+  const url = `${WORDPRESS_URL}/wp-json/wp/v2/posts?include=${wanted.join(",")}&per_page=${wanted.length}&_embed&_fields=id,date,date_gmt,slug,title,excerpt,categories,tags,_links,_embedded`;
+  const response = await fetch(url, { next: { revalidate: 60 } });
+  if (!response.ok) throw new Error(`WordPress API error: ${response.status} ${response.statusText}`);
+  const posts: WordPressPost[] = await response.json();
+  const byId = new Map(posts.map((post) => [post.id, mapWordPressPostToArticle(post)]));
+  return wanted.map((id) => byId.get(id)).filter((article): article is Article => Boolean(article));
+}
+
 export async function searchWordPressArticles(query: string): Promise<Article[]> {
   if (!WORDPRESS_URL) {
     throw new Error("WORDPRESS_URL nuk është vendosur në .env.local");
