@@ -16,8 +16,9 @@ HTPASSWD=/etc/nginx/.htpasswd-momenti-test
 SITE=/etc/nginx/sites-available/momenti-test
 fail() { echo; echo "XXX DESHTOI: $*"; echo "Faqja live NUK u prek."; exit 1; }
 
-read -r TEST_SITE_PASSWORD || true
-[ "${#TEST_SITE_PASSWORD}" -ge 8 ] || fail "TEST_SITE_PASSWORD mungon ose eshte me i shkurter se 8 shenja"
+# No password on the test site any more (owner's choice). It stays out of Google (noindex),
+# and KFL keeps its own login. stdin may still carry an old secret; it is ignored.
+read -r _unused || true
 [ -f "$UPLOAD" ] || fail "arkiva e kodit nuk u ngarkua"
 [ -f "$LIVE/.env.local" ] || fail "nuk u gjet $LIVE/.env.local"
 
@@ -72,11 +73,7 @@ else
 fi
 pm2 save >/dev/null
 
-echo "== 5/6 nginx + fjalekalimi"
-command -v openssl >/dev/null || fail "openssl mungon"
-printf 'momenti:%s\n' "$(printf '%s' "$TEST_SITE_PASSWORD" | openssl passwd -apr1 -stdin)" > "$HTPASSWD"
-chown root:www-data "$HTPASSWD" 2>/dev/null || true
-chmod 640 "$HTPASSWD"
+echo "== 5/6 nginx (pa fjalekalim, noindex)"
 if [ ! -f "$SITE" ] || ! grep -q "managed-by-momenti-test" "$SITE"; then
 cat > "$SITE" <<NGINX
 # managed-by-momenti-test (ops/staging/setup-test-remote.sh)
@@ -86,8 +83,6 @@ server {
     server_name $DOMAIN;
     client_max_body_size 25m;
 
-    auth_basic "Momenti test";
-    auth_basic_user_file $HTPASSWD;
     add_header X-Robots-Tag "noindex, nofollow, noarchive" always;
 
     location / {
@@ -103,6 +98,9 @@ server {
 }
 NGINX
 fi
+# Remove the password from a site file made by an earlier version (certbot added the HTTPS part to it).
+sed -i '/auth_basic/d' "$SITE"
+rm -f "$HTPASSWD"
 ln -sf "$SITE" /etc/nginx/sites-enabled/momenti-test
 nginx -t >/dev/null 2>&1 || { nginx -t; rm -f /etc/nginx/sites-enabled/momenti-test; fail "konfigurimi nginx kishte gabim (u hoq, live nuk preket)"; }
 systemctl reload nginx
@@ -131,4 +129,4 @@ for i in $(seq 1 60); do
 done
 echo "   test /kycu: $code"
 echo
-echo "=== GATI: https://$DOMAIN (perdoruesi: momenti). Live nuk u prek."
+echo "=== GATI: https://$DOMAIN (pa fjalekalim). Live nuk u prek."
