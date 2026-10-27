@@ -69,7 +69,7 @@ async function enhance(input: Buffer, contentType: string, apiKey: string, targe
     method: "POST", headers: { ...headers, "Content-Type": "application/json", Model: "p-image-upscale", "Try-Sync": "true" },
     // Editorial decision: news photos (protests, injuries) must not be blocked by Pruna's
     // "violence" safety checker, so it is turned off for KFL. Content responsibility stays with the newsroom.
-    body: JSON.stringify({ input: { image: imageUrl.toString(), target, enhance_details: true, enhance_realism: false, output_format: "jpg", output_quality: 92, disable_safety_checker: true } }),
+    body: JSON.stringify({ input: { image: imageUrl.toString(), target, enhance_details: true, enhance_realism: target === 8, output_format: "jpg", output_quality: 92, disable_safety_checker: true } }),
     signal, redirect: "error", cache: "no-store",
   });
   if (!response.ok) {
@@ -128,10 +128,11 @@ export async function POST(request: Request) {
     const input = await boundedBody(request);
     // ?target=2 for the small round / 4:5 photos: they never show above ~600 px, so a 2 MP
     // result is enough and comes back faster. The main photo keeps 4 MP.
-    // ?target=8: "Enhance 8MP" A/B test (Pruna `target` is 1-128 MP; 5-8 MP is billed $0.01). Default stays 4.
+    // ?target=8: A/B test "8MP + Details + Realism" (enhance_realism on only here; Pruna `target`
+    // is 1-128 MP; 5-8 MP is billed $0.01). Default stays 4 with the original settings.
     const requested = new URL(request.url).searchParams.get("target");
     const target = requested === "2" ? 2 : requested === "8" ? 8 : 4;
-    const key = createHash("sha256").update(`v3-target-${target}`).update(request.headers.get("cookie") ?? "").update(input).digest("hex");
+    const key = createHash("sha256").update(target === 8 ? "v3-target-8-realism" : `v3-target-${target}`).update(request.headers.get("cookie") ?? "").update(input).digest("hex");
     for (const [key, job] of jobs) if (job.expires < Date.now()) jobs.delete(key);
     let job = jobs.get(key);
     if (!job) {
