@@ -282,6 +282,8 @@ function coverLayout(image: CanvasImage, transform: MainTransform) {
 }
 
 // Line icons for the photo tools (same stroke style as the other KFL icons).
+type PrunaTarget = 4 | 8;
+
 function ToolIcon({ name }: { name: "pruna" | "filters" | "adjust" | "texture" }) {
   return (
     <svg className="kfl-tool-icon" viewBox="0 0 24 24" aria-hidden="true">
@@ -413,6 +415,10 @@ export default function KflNativeCanvasEditor({ article, brand = "momenti", draf
   const [overlayPruna, setOverlayPruna] = useState<Record<number, { original: string; enhanced: string }>>({});
   // overlays: extra photos (circle / 4:5) enhanced in the same Pruna request, keyed by overlay id.
   const [prunaComparison, setPrunaComparison] = useState<{ original: string; enhanced: string; overlays?: Record<number, { original: string; enhanced: string }> } | null>(null);
+  // A/B test: "Enhance 8MP" keeps its own result next to the 4MP one (prunaComparison).
+  // Remove this state, the 8 in PRUNA_TARGETS and the 8MP buttons to drop the test; 4MP is untouched.
+  const [prunaComparison8, setPrunaComparison8] = useState<{ original: string; enhanced: string } | null>(null);
+  const [prunaTarget, setPrunaTarget] = useState<PrunaTarget | null>(null);
   const [filtersOpen, setFiltersOpen] = useState(false);
   const [filtersLoading, setFiltersLoading] = useState(false);
   const [filterError, setFilterError] = useState("");
@@ -580,8 +586,8 @@ export default function KflNativeCanvasEditor({ article, brand = "momenti", draf
   }
 
   // Photo bytes for Texture: JPG/PNG/WebP as-is; anything else (e.g. AVIF) converted to JPEG first.
-  async function textureSourceBlob(maxSide?: number) {
-    const original = await imageSourceToBlob(mainSource);
+  async function textureSourceBlob(maxSide?: number, sourceUrl: string = mainSource) {
+    const original = await imageSourceToBlob(sourceUrl);
     const allowed = ["image/jpeg", "image/png", "image/webp"].includes(original.type);
     if (allowed && !maxSide) return original;
     const bitmap = await createImageBitmap(original).catch(() => {
@@ -1340,20 +1346,31 @@ export default function KflNativeCanvasEditor({ article, brand = "momenti", draf
     return parts;
   }
 
-  async function enhancePruna() {
+  // The photo the Enhance results were made from. While the 4MP or 8MP result is shown this is
+  // its original, so both sizes always start from the same photo (fair A/B comparison).
+  const prunaBase = [prunaComparison, prunaComparison8].find((pair) => pair && pair.enhanced === mainSource)?.original ?? mainSource;
+  function prunaPairFor(target: PrunaTarget) {
+    const pair = target === 8 ? prunaComparison8 : prunaComparison;
+    return pair && pair.original === prunaBase ? pair : null;
+  }
+
+  async function enhancePruna(target: PrunaTarget = 4) {
     // Set the ref synchronously: two clicks before a React render still submit once.
     if (prunaAbortController.current || !mainImageLoaded) return;
-    if (prunaComparison && [prunaComparison.original, prunaComparison.enhanced].includes(mainSource)) {
-      showPrunaSource(prunaComparison.enhanced);
+    const existing = prunaPairFor(target);
+    if (existing) {
+      showPrunaSource(existing.enhanced);
       return;
     }
+    const base = prunaBase;
     const controller = new AbortController();
     prunaAbortController.current = controller;
     setPrunaProcessing(true);
+    setPrunaTarget(target);
     setNotice("");
     let resultUrl: string | null = null;
     try {
-      const mainBlob = await textureSourceBlob(); // converts AVIF/BMP/GIF/untyped files to JPEG
+      const mainBlob = await textureSourceBlob(undefined, base); // converts AVIF/BMP/GIF/untyped files to JPEG
       // Only the main photo goes to Pruna, alone and at full resolution: sharing Pruna's ~4 MP
       // output with the round/4:5 photos made the main photo noticeably less sharp.
       const extras: ImageOverlay[] = [];
@@ -1361,7 +1378,8 @@ export default function KflNativeCanvasEditor({ article, brand = "momenti", draf
       const source = composite ? composite.blob : mainBlob; // full resolution: a bigger input gives Pruna more detail
       if (controller.signal.aborted) return;
       if (source.size > 20 * 1024 * 1024) throw new Error("Pruna pranon fotografi deri në 20 MB.");
-      const response = await fetch("/kycu/api/enhance-pruna", {
+      // Same request as always; only the target megapixels differ (4 = default, 8 = A/B test).
+      const response = await fetch(target === 8 ? "/kycu/api/enhance-pruna?target=8" : "/kycu/api/enhance-pruna", {
         method: "POST", headers: { "Content-Type": source.type }, body: source,
         credentials: "same-origin", signal: controller.signal,
       });
@@ -1392,7 +1410,8 @@ export default function KflNativeCanvasEditor({ article, brand = "momenti", draf
         objectUrls.current.add(resultUrl);
       }
       resultUrl = null;
-      setPrunaComparison({ original: mainSource, enhanced: enhancedMain, ...(composite ? { overlays: overlayPairs } : {}) });
+      if (target === 8) setPrunaComparison8({ original: base, enhanced: enhancedMain });
+      else setPrunaComparison({ original: base, enhanced: enhancedMain, ...(composite ? { overlays: overlayPairs } : {}) });
       setMainSource(enhancedMain);
       setPreparedPhoto(null);
       setOverlays((current) => current.map((overlay) => {
@@ -1403,7 +1422,7 @@ export default function KflNativeCanvasEditor({ article, brand = "momenti", draf
       const seconds = (Number(response.headers.get("X-Pruna-Processing-Ms")) / 1000).toFixed(1);
       const cost = response.headers.get("X-Pruna-Reported-Cost");
       const together = extras.length ? ` · ${extras.length === 1 ? "1 foto shtesë" : `${extras.length} foto shtesë`} në të njëjtën kërkesë` : "";
-      setNotice(`Pruna: ${response.headers.get("X-Pruna-Input-Resolution")} → ${response.headers.get("X-Pruna-Output-Resolution")} · ${seconds}s${together}${cost ? ` · kosto e raportuar: ${cost}` : ""}`);
+      setNotice(`Pruna ${target}MP: ${response.headers.get("X-Pruna-Input-Resolution")} → ${response.headers.get("X-Pruna-Output-Resolution")} · ${seconds}s${together}${cost ? ` · kosto e raportuar: ${cost}` : ""}`);
     } catch (error) {
       if (!controller.signal.aborted) {
         setNoticeKind("error");
@@ -1414,34 +1433,40 @@ export default function KflNativeCanvasEditor({ article, brand = "momenti", draf
       if (prunaAbortController.current === controller) {
         prunaAbortController.current = null;
         setPrunaProcessing(false);
+        setPrunaTarget(null);
       }
     }
   }
 
-  function prunaButtons(mobile = false) {
-    const hasResult = Boolean(prunaComparison && [prunaComparison.original, prunaComparison.enhanced].includes(mainSource));
-    const showingEnhanced = hasResult && mainSource === prunaComparison?.enhanced;
+  function prunaButtons(mobile = false, target: PrunaTarget = 4) {
+    const pair = prunaPairFor(target);
+    const hasResult = Boolean(pair);
+    const showingEnhanced = hasResult && mainSource === pair?.enhanced;
     const busy = prunaProcessing;
+    const working = prunaProcessing && prunaTarget === target;
+    const name = `Enhance ${target}MP`;
     // First press sends one paid request. Once a result exists, the same button only
     // switches between the two saved versions locally — no new request, no credits.
-    const label = prunaProcessing ? "Enhance po përpunohet…"
-      : hasResult ? (showingEnhanced ? "Enhance: ON · shfaq origjinalen" : "Enhance: OFF · shfaq Enhance")
-      : "Enhance";
+    const label = working ? `${name} po përpunohet…`
+      : hasResult ? (showingEnhanced ? `${name}: ON · shfaq origjinalen` : `${name}: OFF · shfaq Enhance`)
+      : name;
     return (
       <button
         className={`${mobile ? "kfl-overlay-add-button kfl-enhance-mobile" : "kfl-enhance-toggle"}${showingEnhanced ? " is-active" : ""}`}
         type="button"
         onClick={() => {
-          if (hasResult && prunaComparison) showPrunaSource(showingEnhanced ? prunaComparison.original : prunaComparison.enhanced);
-          else void enhancePruna();
+          if (pair) showPrunaSource(showingEnhanced ? pair.original : pair.enhanced);
+          else void enhancePruna(target);
         }}
         disabled={!mainImageLoaded || busy}
-        aria-busy={prunaProcessing}
+        aria-busy={working}
         aria-pressed={hasResult ? showingEnhanced : undefined}
         aria-label={label}
-        title={hasResult ? `${label} (pa kosto)` : "Enhance · 4 MP (përdor kredi)"}
+        title={hasResult ? `${label} (pa kosto)` : `${name} (përdor kredi${target === 8 ? " · 0.01 $" : ""})`}
       >
-        {prunaProcessing ? (mobile ? "…" : "Enhance po përpunohet…") : mobile ? <ToolIcon name="pruna" /> : <><ToolIcon name="pruna" />{hasResult ? (showingEnhanced ? "Enhance: ON" : "Enhance: OFF") : "Enhance"}</>}
+        {working ? (mobile ? "…" : `${name}…`)
+          : mobile ? <>{<ToolIcon name="pruna" />}<span className="kfl-enhance-mp-badge">{target}</span></>
+          : <><ToolIcon name="pruna" />{hasResult ? (showingEnhanced ? `${target}MP: ON` : `${target}MP: OFF`) : name}</>}
       </button>
     );
   }
@@ -2241,6 +2266,7 @@ export default function KflNativeCanvasEditor({ article, brand = "momenti", draf
             </div>
               <div className="kfl-mobile-photo-actions" aria-label="Veprimet e fotografive">
                 {prunaButtons(true)}
+                {prunaButtons(true, 8)}
                 <button className={`kfl-overlay-add-button kfl-filter-mobile${selectedFilterId !== "original" ? " is-active" : ""}`} type="button" onClick={() => void toggleFilters()} aria-expanded={filtersOpen} aria-label="Hap Filters" title="Filters"><ToolIcon name="filters" /></button>
                 <button className={`kfl-overlay-add-button kfl-filter-mobile${adjustActive ? " is-active" : ""}`} type="button" onClick={toggleAdjust} aria-expanded={adjustOpen} aria-label="Hap Rregullimet" title="Rregullime (Auto, Qartësia, Hijet…)"><ToolIcon name="adjust" /></button>
                 <button className={`kfl-overlay-add-button kfl-filter-mobile${textureOpen ? " is-active" : ""}`} type="button" onClick={toggleTexture} aria-expanded={textureOpen} aria-label="Hap Texture" title="Texture (Grain, Dust, Film…)"><ToolIcon name="texture" /></button>
@@ -2280,6 +2306,7 @@ export default function KflNativeCanvasEditor({ article, brand = "momenti", draf
               {/* Desktop: the four photo tools as equal tiles, then filter status + Undo/Redo. */}
               <div className="kfl-tool-grid">
                 {prunaButtons()}
+                {prunaButtons(false, 8)}
                 <button className={`kfl-enhance-toggle${selectedFilterId !== "original" ? " is-active" : ""}${filtersOpen ? " is-open" : ""}`} type="button" onClick={() => void toggleFilters()} aria-expanded={filtersOpen}><ToolIcon name="filters" />Filters</button>
                 <button className={`kfl-enhance-toggle${adjustActive ? " is-active" : ""}${adjustOpen ? " is-open" : ""}`} type="button" onClick={toggleAdjust} aria-expanded={adjustOpen}><ToolIcon name="adjust" />Rregullime</button>
                 <button className={`kfl-enhance-toggle${textureOpen ? " is-active is-open" : ""}`} type="button" onClick={toggleTexture} aria-expanded={textureOpen}><ToolIcon name="texture" />Texture</button>

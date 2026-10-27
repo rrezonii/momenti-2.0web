@@ -100,7 +100,8 @@ async function enhance(input: Buffer, contentType: string, apiKey: string, targe
   if (url.origin !== API || !url.pathname.startsWith("/v1/predictions/delivery/")) throw new Error("Adresa e rezultatit Pruna është e pavlefshme.");
   const download = await fetch(url, { headers, signal, redirect: "error", cache: "no-store" });
   if (!download.ok) throw new Error("Nuk u shkarkua rezultati Pruna. Fotografia origjinale është ruajtur.");
-  const output = await sharp(await boundedBody(download), { limitInputPixels: 8_000_000 }).rotate().jpeg({ quality: 92 }).toBuffer({ resolveWithObject: true });
+  // 4 MP (and 2 MP) results keep the original 8 MP check; the 8 MP A/B test needs room for ~8.4 MP.
+  const output = await sharp(await boundedBody(download), { limitInputPixels: target === 8 ? 12_000_000 : 8_000_000 }).rotate().jpeg({ quality: 92 }).toBuffer({ resolveWithObject: true });
   if (Math.abs((output.info.width / output.info.height) / (width / height) - 1) > 0.02) throw new Error("Pruna ndryshoi raportin e fotos. Fotografia origjinale është ruajtur.");
   const cost = prediction.cost ?? prediction.usage?.cost ?? prediction.metadata?.cost;
   const finished = Date.now();
@@ -127,7 +128,9 @@ export async function POST(request: Request) {
     const input = await boundedBody(request);
     // ?target=2 for the small round / 4:5 photos: they never show above ~600 px, so a 2 MP
     // result is enough and comes back faster. The main photo keeps 4 MP.
-    const target = new URL(request.url).searchParams.get("target") === "2" ? 2 : 4;
+    // ?target=8: "Enhance 8MP" A/B test (Pruna `target` is 1-128 MP; 5-8 MP is billed $0.01). Default stays 4.
+    const requested = new URL(request.url).searchParams.get("target");
+    const target = requested === "2" ? 2 : requested === "8" ? 8 : 4;
     const key = createHash("sha256").update(`v3-target-${target}`).update(request.headers.get("cookie") ?? "").update(input).digest("hex");
     for (const [key, job] of jobs) if (job.expires < Date.now()) jobs.delete(key);
     let job = jobs.get(key);
