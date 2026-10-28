@@ -307,7 +307,7 @@ body.modal-open{overflow:hidden}
 .p-band{left:0;top:0;width:1414px;height:368px;background:var(--red)}
 .p-company{left:0;width:1414px;top:72px;text-align:center;color:#fff;font-size:82px;font-weight:700;letter-spacing:.005em;padding-left:80px}
 .p-logo{left:518px;top:196px;width:372px;height:146px}
-.p-title{left:112px;top:405px;width:518px;height:140px}
+.p-title{left:112px;top:380px;width:518px;height:175px;overflow:visible}
 .p-k{left:725px;font-size:27px;font-weight:700}
 .p-v{left:980px;font-size:27px;font-weight:700}
 .p-ul{height:2px;background:var(--navy)}
@@ -439,7 +439,7 @@ Facebook</textarea></label>
     var c = clientOf(inv), amt = inv.amount ? money(inv.amount) : "€ —";
     return '<div class="paper">'
       + '<div class="p-band"></div><div class="p-company">Momenti Media SH.P.K</div><img class="p-logo" src="' + LOGO + '" alt="">'
-      + '<svg class="p-title" viewBox="0 0 518 140"><text x="0" y="132" textLength="518" lengthAdjust="spacingAndGlyphs" font-family="Outfit, Arial, sans-serif" font-weight="800" font-size="158" fill="#9b0019">FATURË</text></svg>'
+      + '<svg class="p-title" viewBox="0 0 518 175" overflow="visible"><text x="0" y="157" textLength="518" lengthAdjust="spacing" font-family="Outfit, Arial, sans-serif" font-weight="800" font-size="150" fill="#9b0019">FATURË</text></svg>'
       + '<div class="p-k" style="top:382px">Nr. Biznesit</div><div class="p-v" style="top:382px">812409820</div>'
       + '<div class="p-ul" style="left:725px;top:432px;width:116px"></div><div class="p-ul" style="left:980px;top:432px;width:350px"></div>'
       + '<div class="p-k" style="top:447px">Nr. Faturës</div><div class="p-v" style="top:447px">' + esc(inv.number || "—") + '</div>'
