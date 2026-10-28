@@ -145,27 +145,42 @@ export async function POST(request: Request) {
   if (new URL(request.url).searchParams.has("client")) return clientSave(request);
   const body = await request.json().catch(() => null) as Record<string, unknown> | null;
   const date = validDate(body?.date);
-  const amount = validAmount(body?.amount);
   const id = typeof body?.id === "string" ? body.id : "";
   const clients = await readClients();
   const clientData = clients.find((item) => item.id === body?.client) ?? null;
-  const client = clientData?.id ?? null;
-  if (!date || !amount || (!id && !client)) return json({ error: "Plotëso vlerën dhe datën." }, 400);
   const now = new Date().toISOString();
-  const { list, result } = await update((current) => {
-    if (id) {
-      // Editing keeps the invoice number; only the value and date change.
+  if (id) {
+    // Edit an existing invoice: date, value, number (must stay unique) and, for uploaded ones, the client.
+    const amountRaw = body?.amount;
+    const numberText = typeof body?.number === "string" ? body.number : "";
+    const match = numberText ? numberText.match(/^\s*#?\s*(\d{1,4})\s*[/.\-]\s*(\d{4})\s*$/) : null;
+    if (numberText && !match) return json({ error: "Numri i faturës duhet të jetë si #05/2026." }, 400);
+    if (!date) return json({ error: "Zgjidh datën." }, 400);
+    let error = "";
+    const { list, result } = await update((current) => {
       const existing = current.find((item) => item.id === id);
-      if (!existing || existing.file) return { list: current, result: null as Invoice | null };
-      const changed = { ...existing, date, amount, updatedAt: now };
+      if (!existing) { error = "Fatura nuk u gjet."; return { list: current, result: null as Invoice | null }; }
+      const amount = existing.file && (amountRaw === 0 || amountRaw === "" || amountRaw == null) ? 0 : validAmount(amountRaw);
+      if (amount === null) { error = "Shkruaj vlerën e faturës."; return { list: current, result: null as Invoice | null }; }
+      const seq = match ? Number(match[1]) : existing.seq, year = match ? Number(match[2]) : existing.year;
+      const number = formatNumber(seq, year);
+      if (current.some((item) => item.id !== id && item.number === number)) { error = `Fatura ${number} ekziston tashmë.`; return { list: current, result: null as Invoice | null }; }
+      const changed: Invoice = { ...existing, date, amount, seq, year, number, updatedAt: now,
+        ...(existing.file && clientData ? { client: clientData.id } : {}) };
       return { list: current.map((item) => item.id === id ? changed : item), result: changed };
-    }
+    });
+    if (!result) return json({ error: error || "Ruajtja dështoi." }, 400);
+    const thisYear = new Date().getFullYear();
+    return json({ invoice: result, invoices: sorted(list), next: formatNumber(nextSeq(list, thisYear), thisYear) });
+  }
+  const amount = validAmount(body?.amount);
+  if (!date || !amount || !clientData) return json({ error: "Plotëso vlerën dhe datën." }, 400);
+  const { list, result } = await update((current) => {
     const year = Number(date.slice(0, 4));
     const seq = nextSeq(current, year);
-    const invoice: Invoice = { id: randomUUID(), client: client!, clientData: clientData!, year, seq, number: formatNumber(seq, year), date, amount, createdAt: now, updatedAt: now };
+    const invoice: Invoice = { id: randomUUID(), client: clientData.id, clientData, year, seq, number: formatNumber(seq, year), date, amount, createdAt: now, updatedAt: now };
     return { list: [...current, invoice], result: invoice };
   });
-  if (!result) return json({ error: "Fatura nuk u gjet." }, 404);
   const year = new Date().getFullYear();
   return json({ invoice: result, invoices: sorted(list), next: formatNumber(nextSeq(list, year), year) });
 }
@@ -256,7 +271,7 @@ body{margin:0;min-height:100vh;font-family:Outfit,Segoe UI,Arial,sans-serif;colo
 .top h1{margin:0;font-size:24px;font-weight:800}
 .top a,.link{color:#ffb4bb;font-weight:600;font-size:14px;text-decoration:none;cursor:pointer;background:none;border:0;font-family:inherit;padding:0}
 h2{color:#fff4ef;font-size:17px;margin:26px 0 10px}
-.clients{display:grid;grid-template-columns:repeat(auto-fill,minmax(240px,1fr));gap:12px}
+.clients{display:grid;grid-template-columns:repeat(auto-fill,minmax(330px,1fr));gap:12px}
 .client{background:#fbfaf6;border-radius:16px;padding:18px;cursor:pointer;border:2px solid transparent;text-align:left;font-family:inherit;color:inherit}
 .client:hover{border-color:#c9a2a7}
 .client b{display:block;font-size:20px;font-weight:800;color:var(--red);letter-spacing:.02em}
@@ -267,16 +282,25 @@ h2{color:#fff4ef;font-size:17px;margin:26px 0 10px}
 .inv .amt{font-weight:800;text-align:right}
 .inv .acts{display:flex;gap:6px;justify-content:flex-end}
 .empty{color:#d9c3c0;font-size:14px}
+.tabs{display:inline-flex;gap:4px;padding:4px;border-radius:12px;background:rgba(255,255,255,.07);margin-bottom:4px}
+.tab{font:inherit;font-weight:700;font-size:15px;border:0;border-radius:9px;padding:9px 18px;background:transparent;color:#ffd9dd;cursor:pointer}
+.tab.is-on{background:#fbfaf6;color:var(--red)}
+button.light{color:#ffd9dd;border-color:rgba(255,214,219,.4)}
+#newClient{width:auto;font-size:14px;padding:7px 10px;border-radius:10px}
+.cdet{display:grid;grid-template-columns:auto 1fr;gap:4px 10px;margin:10px 0 12px;font-size:13.5px}
+.cdet dt{color:var(--muted);font-weight:600}.cdet dd{margin:0;font-weight:600;white-space:pre-line;word-break:break-word}
+.client .buttons{gap:6px}
+.client{cursor:default}
 .client-add{background:transparent;border:2px dashed rgba(255,214,219,.35);color:#ffd9dd;display:flex;align-items:center;justify-content:center;font-weight:700;font-size:16px;min-height:86px}
 .client-add:hover{border-color:#ffb4bb}
-.client .edit-cl{float:right;font-size:12px;color:var(--muted);font-weight:600;text-decoration:underline}
+
 .cl-title{margin:0 0 12px;color:var(--red);font-size:18px}
 .cl-grid{display:grid;grid-template-columns:repeat(2,1fr);gap:0 12px}
 .cl-grid .wide{grid-column:1/-1}
 .cl-grid input,.cl-grid textarea{font-size:16px;padding:10px 12px}
 textarea{font:inherit;font-weight:700;color:var(--navy);border:1.5px solid var(--line);border-radius:12px;background:#fff;width:100%;resize:vertical;outline:none}
 #clForm{margin-top:12px}
-.list-head{display:flex;align-items:center;justify-content:space-between;gap:10px;margin:26px 0 10px}.list-head h2{margin:0}
+.list-head{display:flex;align-items:center;justify-content:space-between;gap:10px;margin:22px 0 10px;flex-wrap:wrap}.list-head h2{margin:0}
 .upload{background:#fbfaf6;border-radius:16px;padding:18px;margin-bottom:12px}
 .up-grid{display:grid;grid-template-columns:2fr 1.3fr 1fr 1.1fr 1fr;gap:10px;align-items:end;padding:10px 0;border-top:1px solid var(--line)}
 .up-grid .fname{font-size:13px;font-weight:700;color:var(--navy);word-break:break-all;align-self:center}
@@ -364,9 +388,12 @@ body.modal-open{overflow:hidden}
   <div class="top"><h1>Faturat · Momenti Media</h1><button class="link hidden" id="back" type="button">← Të gjitha faturat</button></div>
 
   <div id="home">
-    <h2>Klientët</h2>
-    <div class="clients" id="clients">
+    <div class="tabs" role="tablist">
+      <button type="button" class="tab is-on" data-tab="faturat">Faturat</button>
+      <button type="button" class="tab" data-tab="klientet">Klientët</button>
     </div>
+    <section id="tabKlientet" class="hidden">
+    <div class="list-head"><h2>Klientët</h2><button class="btn small" type="button" id="clOpen">+ Shto klient</button></div>
     <form class="upload hidden" id="clForm">
       <h3 class="cl-title" id="clTitle">Klient i ri</h3>
       <div class="cl-grid">
@@ -382,7 +409,14 @@ Facebook</textarea></label>
       </div>
       <div class="buttons"><button class="btn" type="submit" id="clSave">Ruaj klientin</button><button class="btn ghost" type="button" id="clCancel">Anulo</button><span class="status" id="clStatus"></span></div>
     </form>
-    <div class="list-head"><h2>Të gjitha faturat</h2><button class="btn small" type="button" id="upOpen">+ Ngarko faturë</button></div>
+    <div class="clients" id="clients"></div>
+    </section>
+    <section id="tabFaturat">
+    <div class="list-head"><h2>Të gjitha faturat</h2><div class="buttons">
+      <select id="newClient" aria-label="Klienti i faturës së re"></select>
+      <button class="btn small" type="button" id="newInvoice">+ Faturë e re</button>
+      <button class="btn small ghost light" type="button" id="upOpen">Ngarko fatura</button>
+    </div></div>
     <div class="upload hidden" id="upForm">
       <label>Zgjidh faturat (PDF ose foto) · mund t'i zgjedhësh të gjitha njëherësh<input id="upFile" type="file" multiple accept="application/pdf,image/jpeg,image/png,image/webp"></label>
       <p class="up-hint">Nga çdo PDF lexohen vetë numri, data, klienti dhe vlera. Kontrolloji më poshtë dhe ndrysho nëse diçka nuk është në rregull.</p>
@@ -390,6 +424,7 @@ Facebook</textarea></label>
       <div class="buttons"><button class="btn" type="button" id="upSave" disabled>Ruaj të gjitha</button><button class="btn ghost" type="button" id="upCancel">Mbyll</button><span class="status" id="upStatus"></span></div>
     </div>
     <div id="list"><div class="empty">Duke i ngarkuar…</div></div>
+    </section>
   </div>
 
   <div id="edit" class="hidden">
@@ -397,7 +432,7 @@ Facebook</textarea></label>
       <div class="panel">
         <h3 id="edTitle">AIRTIKETA · Faturë e re</h3>
         <p id="edHint">Ndrysho vetëm vlerën. Numri i faturës jepet automatikisht.</p>
-        <label>Nr. Faturës<div class="fixed" id="edNumber">—</div></label>
+        <label>Nr. Faturës<div class="fixed" id="edNumber">—</div><input id="edNumberInput" class="hidden" placeholder="#08/2026" autocomplete="off"></label>
         <label>Vlera (€)<input id="edAmount" inputmode="decimal" placeholder="3.232" autocomplete="off"></label>
         <label><span class="row2"><span>Data</span><button class="link" style="color:#6d1b27;text-transform:none;letter-spacing:0" type="button" id="edDateToggle">Ndrysho datën</button></span><input id="edDate" type="date" readonly></label>
         <div class="buttons">
@@ -418,6 +453,16 @@ Facebook</textarea></label>
       <button class="btn ghost small" style="color:#fff4ef" type="button" id="mEdit">Edito</button>
       <button class="btn small" type="button" id="mPdf">Ruaj PDF</button>
     </div></div>
+    <form class="upload hidden" id="mForm">
+      <div class="up-grid" style="border:0;padding:0 0 10px">
+        <label>Klienti<select id="mfClient"></select></label>
+        <label>Nr. Faturës<input id="mfNumber" placeholder="#05/2026" autocomplete="off"></label>
+        <label>Data<input id="mfDate" type="date"></label>
+        <label>Vlera (€)<input id="mfAmount" inputmode="decimal" placeholder="3.232" autocomplete="off"></label>
+        <div class="buttons" style="align-self:end"><button class="btn" type="submit" id="mfSave">Ruaj</button></div>
+      </div>
+      <span class="status" id="mfStatus"></span>
+    </form>
     <div class="paper-box" id="mPaper"></div>
   </div>
 </div>
@@ -511,12 +556,21 @@ Facebook</textarea></label>
   }
 
   // ---- data
-  function setData(res){ invoices = res.invoices || []; nextNo = res.next || ""; if(res.clients) setClients(res.clients); showList(); }
+  function setData(res){ invoices = res.invoices || []; nextNo = res.next || ""; setClients(res.clients || clientList); showList(); }
   function setClients(list){
     clientList = list; CLIENTS = {}; list.forEach(function(c){ CLIENTS[c.id] = c; });
     $("clients").innerHTML = list.map(function(c){
-      return '<button class="client" type="button" data-client="' + esc(c.id) + '"><span class="edit-cl" data-edit-client="' + esc(c.id) + '">Edito</span><b>' + esc(c.label) + '</b><small>' + esc(c.name) + ' · Faturë e re <span class="nextno">' + esc(nextNo) + '</span></small></button>';
-    }).join("") + '<button class="client client-add" type="button" id="clOpen">+ Shto klient</button>';
+      var count = invoices.filter(function(i){ return i.client === c.id; }).length;
+      function row(k, v){ return v ? '<dt>' + k + '</dt><dd>' + esc(v) + '</dd>' : ''; }
+      return '<div class="client"><b>' + esc(c.label) + '</b><small>' + count + (count === 1 ? ' faturë' : ' fatura') + '</small>'
+        + '<dl class="cdet">' + row("Emri", c.name) + row("Nr. Biznesit", c.business) + row("Adresa", [c.address1, c.address2].filter(Boolean).join("\n"))
+        + row("NR. unik", c.uid) + row("IBAN", c.iban) + row("Shërbimi", c.service) + '</dl>'
+        + '<div class="buttons"><button class="btn small ghost" type="button" data-edit-client="' + esc(c.id) + '">Edito të dhënat</button><button class="btn small" type="button" data-client="' + esc(c.id) + '">Faturë e re <span class="nextno">' + esc(nextNo) + '</span></button></div></div>';
+    }).join("");
+    var sel = $("newClient"), keep = sel.value;
+    sel.innerHTML = list.map(function(c){ return '<option value="' + esc(c.id) + '">' + esc(c.label) + '</option>'; }).join("");
+    if(keep && CLIENTS[keep]) sel.value = keep;
+    $("mfClient").innerHTML = sel.innerHTML;
   }
   function load(){
     fetch("/faturat?list=1", { credentials: "same-origin", cache: "no-store" }).then(function(r){ if(!r.ok) throw 0; return r.json(); })
@@ -528,26 +582,29 @@ Facebook</textarea></label>
     $("list").innerHTML = invoices.map(function(inv){
       var c = clientOf(inv);
       return '<div class="inv" data-id="' + esc(inv.id) + '"><span class="no">' + esc(inv.number) + '</span><span>' + esc(c.label) + (inv.file ? '<span class="tag">E NGARKUAR</span>' : '') + '</span><span class="date">' + esc(dmy(inv.date)) + '</span><span class="amt">' + (inv.amount ? esc(money(inv.amount)) : "—") + '</span>'
-        + '<span class="acts">' + (inv.file ? '' : '<button class="btn ghost small" type="button" data-edit="' + esc(inv.id) + '">Edito</button>') + '<button class="btn ghost small" type="button" data-del="' + esc(inv.id) + '">Fshi</button></span></div>';
+        + '<span class="acts"><button class="btn ghost small" type="button" data-edit="' + esc(inv.id) + '">Edito</button>' + '<button class="btn ghost small" type="button" data-del="' + esc(inv.id) + '">Fshi</button></span></div>';
     }).join("");
   }
 
   // ---- views
   function show(view){ $("home").classList.toggle("hidden", view !== "home"); $("edit").classList.toggle("hidden", view !== "edit"); $("back").classList.toggle("hidden", view === "home"); window.scrollTo(0, 0); }
-  function draft(){ return { client: editClient, clientData: editing ? editing.clientData : CLIENTS[editClient], number: editing ? editing.number : nextNo, date: $("edDate").value || today(), amount: cents($("edAmount").value) }; }
+  function draft(){ return { client: editClient, clientData: editing ? editing.clientData : CLIENTS[editClient], number: editing ? ($("edNumberInput").value.trim() || editing.number) : nextNo, date: $("edDate").value || today(), amount: cents($("edAmount").value) }; }
   function refresh(){ mount($("edPaper"), draft()); }
   function openEditor(inv, client){
     editing = inv || null; editClient = inv ? inv.client : client;
     var c = inv ? clientOf(inv) : CLIENTS[editClient];
     $("edTitle").textContent = c.label + (inv ? " · Edito " + inv.number : " · Faturë e re");
-    $("edHint").textContent = inv ? "Numri i faturës mbetet " + inv.number + ". Ndrysho vlerën ose datën." : "Ndrysho vetëm vlerën. Numri i faturës jepet automatikisht.";
-    $("edNumber").textContent = inv ? inv.number : (nextNo + " (automatik)");
+    $("edHint").textContent = inv ? "Mund të ndryshosh numrin, datën ose vlerën." : "Ndrysho vetëm vlerën. Numri i faturës jepet automatikisht.";
+    $("edNumber").textContent = nextNo + " (automatik)";
+    $("edNumber").classList.toggle("hidden", Boolean(inv)); $("edNumberInput").classList.toggle("hidden", !inv);
+    $("edNumberInput").value = inv ? inv.number : "";
     $("edAmount").value = inv ? plain(inv.amount) : "";
     $("edDate").value = inv ? inv.date : today(); $("edDate").readOnly = true; $("edDateToggle").textContent = "Ndrysho datën";
     $("edStatus").textContent = "";
     show("edit"); refresh(); $("edAmount").focus();
   }
   $("edAmount").addEventListener("input", refresh);
+  $("edNumberInput").addEventListener("input", refresh);
   $("edDate").addEventListener("input", refresh);
   $("edDateToggle").addEventListener("click", function(){
     var input = $("edDate");
@@ -559,12 +616,13 @@ Facebook</textarea></label>
     if(!d.amount){ $("edStatus").textContent = "Shkruaj vlerën e faturës."; $("edAmount").focus(); return; }
     btn.disabled = true; $("edStatus").textContent = "Duke ruajtur…";
     fetch("/faturat", { method: "POST", credentials: "same-origin", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(editing ? { id: editing.id, date: d.date, amount: d.amount } : { client: d.client, date: d.date, amount: d.amount }) })
+      body: JSON.stringify(editing ? { id: editing.id, number: d.number, date: d.date, amount: d.amount } : { client: d.client, date: d.date, amount: d.amount }) })
       .then(function(r){ return r.json().then(function(b){ if(!r.ok) throw new Error(b.error || ""); return b; }); })
       .then(function(res){
         setData(res); editing = res.invoice;
         $("edTitle").textContent = clientOf(res.invoice).label + " · " + res.invoice.number;
-        $("edNumber").textContent = res.invoice.number; refresh();
+        $("edNumber").classList.add("hidden"); $("edNumberInput").classList.remove("hidden"); $("edNumberInput").value = res.invoice.number;
+        $("edHint").textContent = "Mund të ndryshosh numrin, datën ose vlerën."; refresh();
         $("edStatus").textContent = "Fatura " + res.invoice.number + " u ruajt ✓";
       })
       .catch(function(e){ $("edStatus").textContent = e.message || "Ruajtja dështoi. Provo përsëri."; })
@@ -589,9 +647,15 @@ Facebook</textarea></label>
   $("clients").addEventListener("click", function(e){
     var ed = e.target.closest("[data-edit-client]");
     if(ed){ e.stopPropagation(); openClientForm(CLIENTS[ed.getAttribute("data-edit-client")]); return; }
-    if(e.target.closest("#clOpen")){ openClientForm(null); return; }
     var btn = e.target.closest("[data-client]"); if(btn) openEditor(null, btn.getAttribute("data-client"));
   });
+  $("clOpen").addEventListener("click", function(){ openClientForm(null); });
+  document.querySelectorAll(".tab").forEach(function(t){ t.addEventListener("click", function(){
+    document.querySelectorAll(".tab").forEach(function(x){ x.classList.toggle("is-on", x === t); });
+    $("tabFaturat").classList.toggle("hidden", t.getAttribute("data-tab") !== "faturat");
+    $("tabKlientet").classList.toggle("hidden", t.getAttribute("data-tab") !== "klientet");
+  }); });
+  $("newInvoice").addEventListener("click", function(){ if($("newClient").value) openEditor(null, $("newClient").value); });
   $("clCancel").addEventListener("click", function(){ $("clForm").classList.add("hidden"); });
   $("clForm").addEventListener("submit", function(e){
     e.preventDefault();
@@ -609,7 +673,7 @@ Facebook</textarea></label>
   var opened = null;
   function openModal(inv){
     opened = inv; $("mTitle").textContent = inv.number + " · " + clientOf(inv).label + (inv.file ? " · e ngarkuar" : "");
-    $("mEdit").classList.toggle("hidden", Boolean(inv.file));
+    $("mForm").classList.add("hidden"); $("mfStatus").textContent = "";
     $("mPdf").textContent = inv.file ? "Shkarko" : "Ruaj PDF";
     $("modal").classList.add("is-open"); document.body.classList.add("modal-open");
     if(inv.file){
@@ -622,7 +686,23 @@ Facebook</textarea></label>
   $("mClose").addEventListener("click", closeModal);
   $("modal").addEventListener("click", function(e){ if(e.target === $("modal")) closeModal(); });
   document.addEventListener("keydown", function(e){ if(e.key === "Escape" && opened) closeModal(); });
-  $("mEdit").addEventListener("click", function(){ var inv = opened; closeModal(); openEditor(inv); });
+  $("mEdit").addEventListener("click", function(){
+    var inv = opened;
+    if(!inv.file){ closeModal(); openEditor(inv); return; }
+    // Uploaded invoice: the file stays as it is; edit the details shown in the list.
+    $("mfClient").value = inv.client; $("mfNumber").value = inv.number; $("mfDate").value = inv.date; $("mfAmount").value = inv.amount ? plain(inv.amount) : "";
+    $("mForm").classList.toggle("hidden");
+  });
+  $("mForm").addEventListener("submit", function(e){
+    e.preventDefault(); var inv = opened; if(!inv) return;
+    $("mfSave").disabled = true; $("mfStatus").textContent = "Duke ruajtur…";
+    fetch("/faturat", { method: "POST", credentials: "same-origin", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ id: inv.id, client: $("mfClient").value, number: $("mfNumber").value, date: $("mfDate").value, amount: cents($("mfAmount").value) }) })
+      .then(function(r){ return r.json().then(function(b){ if(!r.ok) throw new Error(b.error || ""); return b; }); })
+      .then(function(res){ setData(res); opened = res.invoice; $("mTitle").textContent = res.invoice.number + " · " + clientOf(res.invoice).label + " · e ngarkuar"; $("mfStatus").textContent = "U ruajt ✓"; })
+      .catch(function(err){ $("mfStatus").textContent = err.message || "Ruajtja dështoi."; })
+      .then(function(){ $("mfSave").disabled = false; });
+  });
   $("mPdf").addEventListener("click", function(){
     if(!opened) return;
     if(opened.file){ var a = document.createElement("a"); a.href = "/faturat?file=" + encodeURIComponent(opened.id) + "&download=1"; document.body.appendChild(a); a.click(); a.remove(); return; }
@@ -715,7 +795,7 @@ Facebook</textarea></label>
   $("list").addEventListener("click", function(e){
     var id, inv;
     var edit = e.target.closest("[data-edit]");
-    if(edit){ inv = invoices.find(function(x){ return x.id === edit.getAttribute("data-edit"); }); if(inv) openEditor(inv); return; }
+    if(edit){ inv = invoices.find(function(x){ return x.id === edit.getAttribute("data-edit"); }); if(inv){ if(inv.file){ openModal(inv); $("mEdit").click(); } else openEditor(inv); } return; }
     var del = e.target.closest("[data-del]");
     if(del){
       id = del.getAttribute("data-del"); inv = invoices.find(function(x){ return x.id === id; });
