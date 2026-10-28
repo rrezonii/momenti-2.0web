@@ -105,6 +105,8 @@ input:focus{border-color:var(--blue);box-shadow:0 0 0 3px rgba(31,58,138,.12)}
 .draft .k{color:var(--muted);font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.04em;display:block}
 .draft button{padding:6px 10px;font-size:13px}
 .empty{color:#d9c3c0;font-size:14px}
+.pdf-stage{position:fixed;left:-10000px;top:0;width:794px;padding:28px 24px;background:radial-gradient(90% 60% at 100% 0%,rgba(161,40,58,.35),transparent 65%),linear-gradient(180deg,#34101a,#2c0b11)}
+.pdf-stage .card{box-shadow:none}.pdf-stage .sheet{margin-top:0}
 button{font:inherit;font-weight:700;border:0;border-radius:10px;padding:10px 16px;cursor:pointer;background:#6d1b27;color:#fff}
 button.ghost{background:transparent;color:var(--muted);border:1.5px solid var(--line)}
 @media (max-width:720px){
@@ -182,7 +184,7 @@ body.modal-open{overflow:hidden}
       <span class="status" id="status"></span>
       <button class="ghost" type="button" id="clear">E re</button>
       <button type="button" id="save">Ruaj draftin</button>
-      <button type="button" onclick="window.print()">Printo / PDF</button>
+      <button type="button" id="pdfMain">Ruaj PDF</button>
     </div>
   </div>
   <div class="modal" id="modal" role="dialog" aria-modal="true" aria-label="Drafti">
@@ -190,7 +192,7 @@ body.modal-open{overflow:hidden}
       <div class="modal-head"><small id="modalWhen"></small><div>
         <button class="ghost" type="button" id="modalClose">Mbyll</button>
         <button class="ghost" type="button" id="modalEdit">Edito</button>
-        <button type="button" onclick="window.print()">Printo / PDF</button>
+        <button type="button" id="pdfDraft">Ruaj PDF</button>
       </div></div>
       <div class="sheet" id="modalSheet"></div>
     </div>
@@ -324,6 +326,37 @@ body.modal-open{overflow:hidden}
     current = d.id; $("period").value = d.period; $("a").value = d.a; $("b").value = d.b; render(); showDrafts();
     status("Po e editon draftin. “Ruaj draftin” e ruan mbi të njëjtin."); window.scrollTo({ top: 0, behavior: "smooth" });
   });
+  // "Ruaj PDF": draws the header + sheet on the dark page (same design as on screen) and downloads an A4 PDF.
+  function loadScript(src){ return new Promise(function(ok, fail){ var s = document.createElement("script"); s.src = src; s.onload = ok; s.onerror = fail; document.head.appendChild(s); }); }
+  var libs = null;
+  function pdfLibs(){
+    return libs || (libs = Promise.all([
+      loadScript("https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"),
+      loadScript("https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"),
+    ]).catch(function(e){ libs = null; throw e; }));
+  }
+  function savePdf(period, sheetInner, button){
+    var label = button.textContent; button.disabled = true; button.textContent = "Duke krijuar…";
+    var stage = document.createElement("div"); stage.className = "pdf-stage";
+    stage.innerHTML = '<header><h1>Kalkulatori i ndarjes</h1><span>MOMENTI · REDAKSIA</span></header><div class="card"><div class="sheet">' + sheetInner + '</div></div>';
+    stage.querySelectorAll("input.name").forEach(function(input, i){ var d = document.createElement("div"); d.className = "name"; d.style.border = "0"; d.textContent = $("n" + (i + 1)).value; input.replaceWith(d); });
+    document.body.appendChild(stage);
+    pdfLibs().then(function(){ return document.fonts ? document.fonts.ready : null; })
+      .then(function(){ return window.html2canvas(stage, { scale: 2, backgroundColor: "#2c0b11" }); })
+      .then(function(canvas){
+        var pdf = new window.jspdf.jsPDF({ unit: "mm", format: "a4", orientation: "portrait" });
+        var w = 210, h = canvas.height * w / canvas.width;
+        pdf.setFillColor(44, 11, 17); pdf.rect(0, 0, 210, 297, "F");
+        pdf.addImage(canvas.toDataURL("image/jpeg", 0.95), "JPEG", 0, 0, w, Math.min(h, 297));
+        var name = (period || "kalkulimi").replace(/[^\p{L}\p{N}]+/gu, "-").replace(/^-|-$/g, "") || "kalkulimi";
+        pdf.save("Momenti-" + name + ".pdf");
+        status("PDF u ruajt ✓");
+      })
+      .catch(function(){ status("PDF nuk u krijua. Kontrollo internetin dhe provo përsëri."); })
+      .then(function(){ stage.remove(); button.disabled = false; button.textContent = label; });
+  }
+  $("pdfMain").addEventListener("click", function(){ savePdf($("period").value, document.querySelector(".wrap > .card .sheet").innerHTML, this); });
+  $("pdfDraft").addEventListener("click", function(){ savePdf(opened ? opened.period : "", $("modalSheet").innerHTML, this); });
   $("clear").addEventListener("click", function(){ current = null; $("a").value = ""; $("b").value = ""; $("period").value = ""; render(); showDrafts(); status(""); $("period").focus(); });
   ["n1","n2","n3"].forEach(function(id){ $(id).addEventListener("input", showDrafts); });
   render(); load();
