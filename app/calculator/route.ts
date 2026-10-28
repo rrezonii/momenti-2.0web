@@ -106,7 +106,7 @@ input:focus{border-color:var(--blue);box-shadow:0 0 0 3px rgba(31,58,138,.12)}
 .draft button{padding:6px 10px;font-size:13px}
 .empty{color:#d9c3c0;font-size:14px}
 .pdf-stage{position:fixed;left:-10000px;top:0;width:794px;padding:28px 24px;background:radial-gradient(90% 60% at 100% 0%,rgba(161,40,58,.35),transparent 65%),linear-gradient(180deg,#34101a,#2c0b11)}
-.pdf-stage .card{box-shadow:none}.pdf-stage .sheet{margin-top:0}
+.pdf-stage .card{box-shadow:none}.pdf-meta{display:flex;flex-direction:column;align-items:flex-end;gap:4px}.pdf-meta b{color:#fff4ef;font-size:13px;font-weight:700}.pdf-stage .sheet{margin-top:0}
 button{font:inherit;font-weight:700;border:0;border-radius:10px;padding:10px 16px;cursor:pointer;background:#6d1b27;color:#fff}
 button.ghost{background:transparent;color:var(--muted);border:1.5px solid var(--line)}
 @media (max-width:720px){
@@ -335,10 +335,14 @@ body.modal-open{overflow:hidden}
       loadScript("https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"),
     ]).catch(function(e){ libs = null; throw e; }));
   }
-  function savePdf(period, sheetInner, button){
+  function stamp(date){
+    var p2 = function(x){ return String(x).padStart(2,"0"); };
+    return p2(date.getDate()) + "." + p2(date.getMonth()+1) + "." + date.getFullYear() + " · " + p2(date.getHours()) + ":" + p2(date.getMinutes());
+  }
+  function savePdf(period, sheetInner, button, created){
     var label = button.textContent; button.disabled = true; button.textContent = "Duke krijuar…";
     var stage = document.createElement("div"); stage.className = "pdf-stage";
-    stage.innerHTML = '<header><h1>Kalkulatori i ndarjes</h1><span>MOMENTI · REDAKSIA</span></header><div class="card"><div class="sheet">' + sheetInner + '</div></div>';
+    stage.innerHTML = '<header><h1>Kalkulatori i ndarjes</h1><div class="pdf-meta"><span>MOMENTI · REDAKSIA</span><b>Krijuar më ' + stamp(created || new Date()) + '</b></div></header><div class="card"><div class="sheet">' + sheetInner + '</div></div>';
     stage.querySelectorAll("input.name").forEach(function(input, i){ var d = document.createElement("div"); d.className = "name"; d.style.border = "0"; d.textContent = $("n" + (i + 1)).value; input.replaceWith(d); });
     document.body.appendChild(stage);
     pdfLibs().then(function(){ return document.fonts ? document.fonts.ready : null; })
@@ -355,8 +359,8 @@ body.modal-open{overflow:hidden}
       .catch(function(){ status("PDF nuk u krijua. Kontrollo internetin dhe provo përsëri."); })
       .then(function(){ stage.remove(); button.disabled = false; button.textContent = label; });
   }
-  $("pdfMain").addEventListener("click", function(){ savePdf($("period").value, document.querySelector(".wrap > .card .sheet").innerHTML, this); });
-  $("pdfDraft").addEventListener("click", function(){ savePdf(opened ? opened.period : "", $("modalSheet").innerHTML, this); });
+  $("pdfMain").addEventListener("click", function(){ var d = drafts.find(function(x){ return x.id === current; }); savePdf($("period").value, document.querySelector(".wrap > .card .sheet").innerHTML, this, d ? new Date(d.savedAt) : null); });
+  $("pdfDraft").addEventListener("click", function(){ savePdf(opened ? opened.period : "", $("modalSheet").innerHTML, this, opened ? new Date(opened.savedAt) : null); });
   $("clear").addEventListener("click", function(){ current = null; $("a").value = ""; $("b").value = ""; $("period").value = ""; render(); showDrafts(); status(""); $("period").focus(); });
   ["n1","n2","n3"].forEach(function(id){ $(id).addEventListener("input", showDrafts); });
   render(); load();
