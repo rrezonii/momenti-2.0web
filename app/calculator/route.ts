@@ -89,6 +89,7 @@ input:focus{border-color:var(--blue);box-shadow:0 0 0 3px rgba(31,58,138,.12)}
 .name:hover,.name:focus{border-bottom-color:var(--red);box-shadow:none}
 .row{display:flex;justify-content:space-between;align-items:baseline;gap:8px;padding:5px 0;font-size:17px;color:var(--blue);font-weight:600}
 .row .op{color:var(--muted);font-weight:700;min-width:58px}
+.row span,.box,.sum div{white-space:nowrap}
 .row.rule{border-bottom:2px solid var(--blue)}
 .row.result{font-weight:900;font-size:21px;color:var(--ink)}
 .row.result .v{border:2px solid var(--blue);border-radius:10px;padding:2px 10px}
@@ -118,8 +119,18 @@ button.ghost{background:transparent;color:var(--muted);border:1.5px solid var(--
 .modal-head small{color:var(--muted)}
 .modal-head div{display:flex;gap:8px}
 body.modal-open{overflow:hidden}
-@media print{body{background:#fff;padding:0}header,.actions,.inputs,.drafts,.modal-head{display:none}.card{box-shadow:none}
-  body.modal-open .wrap{display:none}.modal{position:static;background:none;padding:0}}
+/* Print / PDF keeps the on-screen design: dark burgundy page, header and the paper card with the sheet. */
+@page{size:A4;margin:0}
+@media print{
+  *{-webkit-print-color-adjust:exact;print-color-adjust:exact}
+  html,body{min-height:100%}
+  body{padding:28px 24px;min-height:297mm}
+  .actions,.inputs,.drafts,.modal-head{display:none!important}
+  .sheet{margin-top:0}
+  .card{box-shadow:none;break-inside:avoid}
+  body.modal-open .wrap>.card{display:none}
+  body.modal-open .modal{position:static;display:block;background:none;padding:0;overflow:visible}
+}
 </style>
 </head>
 <body>
