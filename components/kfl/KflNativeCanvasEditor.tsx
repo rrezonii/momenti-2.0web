@@ -1218,11 +1218,12 @@ export default function KflNativeCanvasEditor({ article, brand = "momenti", draf
           wordIndex += 1;
         }
         const groupWidth = context.measureText(groupText).width;
-        if (highlighted) {
-          context.fillStyle = isBallina ? "#ffffff" : "rgba(155, 24, 23, 0.70)";
+        // @fjalë@: Ballina keeps its white strip; KFL news posts colour only the words, in the badge-strip red (no strip).
+        if (highlighted && isBallina) {
+          context.fillStyle = "#ffffff";
           context.fillRect(groupStart - 6, lineY + 2, groupWidth + 12, titleLayout.lineHeight - 4);
         }
-        if (highlighted) context.fillStyle = isBallina ? BALLINA_NAVY : GOLD;
+        if (highlighted) context.fillStyle = isBallina ? BALLINA_NAVY : "rgb(155, 24, 23)";
         else context.fillStyle = isBallina ? "#ffffff" : GOLD;
         context.fillText(groupText, groupStart, lineY, Math.max(1, TITLE_X + TITLE_WIDTH - groupStart));
         x = groupStart + groupWidth;
