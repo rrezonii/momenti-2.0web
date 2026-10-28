@@ -1473,6 +1473,23 @@ export default function KflNativeCanvasEditor({ article, brand = "momenti", draf
     }
   }
 
+  function bwButton(mobile = false) {
+    const has = Boolean(bwPair && [bwPair.original, bwPair.styled].includes(mainSource));
+    const on = has && mainSource === bwPair?.styled;
+    const label = bwProcessing ? "B&W…" : has ? (on ? "B&W: ON" : "B&W: OFF") : "B&W AI";
+    return (
+      <button
+        className={`${mobile ? "kfl-overlay-add-button kfl-filter-mobile" : "kfl-enhance-toggle"}${on ? " is-active" : ""}`}
+        type="button" onClick={() => void bwPruna()}
+        disabled={!mainImageLoaded || bwProcessing || prunaProcessing}
+        aria-busy={bwProcessing} aria-pressed={has ? on : undefined} aria-label={label}
+        title={has ? "Ndërro B&W AI / origjinalen (pa kosto)" : "B&W AI me Pruna (përdor kredi, ~$0.01)"}
+      >
+        {mobile ? (bwProcessing ? "…" : <ToolIcon name="bw" />) : <><ToolIcon name="bw" />{label}</>}
+      </button>
+    );
+  }
+
   function prunaButtons(mobile = false) {
     const hasResult = Boolean(prunaComparison && [prunaComparison.original, prunaComparison.enhanced].includes(mainSource));
     const showingEnhanced = hasResult && mainSource === prunaComparison?.enhanced;
@@ -2299,6 +2316,7 @@ export default function KflNativeCanvasEditor({ article, brand = "momenti", draf
                 <button className={`kfl-overlay-add-button kfl-filter-mobile${selectedFilterId !== "original" ? " is-active" : ""}`} type="button" onClick={() => void toggleFilters()} aria-expanded={filtersOpen} aria-label="Hap Filters" title="Filters"><ToolIcon name="filters" /></button>
                 <button className={`kfl-overlay-add-button kfl-filter-mobile${adjustActive ? " is-active" : ""}`} type="button" onClick={toggleAdjust} aria-expanded={adjustOpen} aria-label="Hap Rregullimet" title="Rregullime (Auto, Qartësia, Hijet…)"><ToolIcon name="adjust" /></button>
                 <button className={`kfl-overlay-add-button kfl-filter-mobile${textureOpen ? " is-active" : ""}`} type="button" onClick={toggleTexture} aria-expanded={textureOpen} aria-label="Hap Texture" title="Texture (Grain, Dust, Film…)"><ToolIcon name="texture" /></button>
+                {bwButton(true)}
                 <button className="kfl-overlay-add-button kfl-mobile-image-button" type="button" onClick={() => mainFileInput.current?.click()} aria-label="Zëvendëso fotografinë kryesore">
                   <span className="kfl-mobile-image-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><rect x="3.5" y="4.5" width="17" height="15" rx="2" /><circle cx="9" cy="10" r="1.7" /><path d="m5 18 5-5 3.2 3 2.4-2.4L19 18" /></svg><span className="kfl-overlay-plus-badge">+</span></span>
                 </button>
@@ -2339,11 +2357,7 @@ export default function KflNativeCanvasEditor({ article, brand = "momenti", draf
                 <button className={`kfl-enhance-toggle${adjustActive ? " is-active" : ""}${adjustOpen ? " is-open" : ""}`} type="button" onClick={toggleAdjust} aria-expanded={adjustOpen}><ToolIcon name="adjust" />Rregullime</button>
                 <button className={`kfl-enhance-toggle${textureOpen ? " is-active is-open" : ""}`} type="button" onClick={toggleTexture} aria-expanded={textureOpen}><ToolIcon name="texture" />Texture</button>
                 {/* B&W AI: Pruna prompt edit (p-image-edit, ~$0.01). After the first result it only toggles ON/OFF, no cost. */}
-                {(() => {
-                  const has = Boolean(bwPair && [bwPair.original, bwPair.styled].includes(mainSource));
-                  const on = has && mainSource === bwPair?.styled;
-                  return <button className={`kfl-enhance-toggle${on ? " is-active" : ""}`} type="button" onClick={() => void bwPruna()} disabled={!mainImageLoaded || bwProcessing || prunaProcessing} aria-busy={bwProcessing} aria-pressed={has ? on : undefined} title={has ? "Ndërro B&W AI / origjinalen (pa kosto)" : "B&W AI me Pruna (përdor kredi, ~$0.01)"}><ToolIcon name="bw" />{bwProcessing ? "B&W…" : has ? (on ? "B&W: ON" : "B&W: OFF") : "B&W AI"}</button>;
-                })()}
+                {bwButton()}
               </div>
               <div className="kfl-tool-footer">
                 {selectedFilterId !== "original"
