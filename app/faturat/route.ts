@@ -17,9 +17,17 @@ const START: Record<number, number> = { 2026: 6 };
 const DATA_DIR = process.env.INVOICES_DATA_DIR || path.join(process.cwd(), "data", "invoices");
 const FILE = path.join(DATA_DIR, "invoices.json");
 // Uploaded = an older invoice made elsewhere (PDF/photo kept as a file); it still counts for the numbering.
-type Client = { id: string; label: string; name: string; business: string; address1: string; address2: string; uid: string; service: string };
-const DEFAULT_CLIENTS: Client[] = [{ id: "airtiketa", label: "AIRTIKETA", name: "Airtiketa GmbH", business: "HRB 728839", address1: "Colmarer Str. 1",
-  address2: "79576 Weil am Rhein, Gjermani", uid: "N/A", service: "Te ardhura nga rrjetet sociale:\nFacebook" }];
+type Client = { id: string; label: string; name: string; business: string; address1: string; address2: string; uid: string; service: string; iban?: string };
+const DEFAULT_IBAN = "GB28MOOW00993554710280";
+// Clients found in the earlier invoices (#01–#07/2026); added automatically if missing.
+const DEFAULT_CLIENTS: Client[] = [
+  { id: "airtiketa", label: "AIRTIKETA", name: "Airtiketa GmbH", business: "HRB 728839", address1: "Colmarer Str. 1",
+    address2: "79576 Weil am Rhein, Gjermani", uid: "N/A", service: "Te ardhura nga rrjetet sociale:\nFacebook", iban: DEFAULT_IBAN },
+  { id: "endrit-halili", label: "ENDRIT HALILI", name: "Endrit Halili", business: "", address1: "", address2: "", uid: "N/A",
+    service: "Ndermjetsim i te ardhurave nga\nFacebook", iban: DEFAULT_IBAN },
+  { id: "em-corporation", label: "E M CORPORATION", name: "E M CORPORATION SH.P.K.", business: "+38349229053", address1: "Customs terminal, Office-1",
+    address2: "", uid: "811281857", service: "Baner në video\nVendosje Produkti\n4 STORY në FB\nBaner në portal", iban: "1504001010509116" },
+];
 // clientData = the client's details copied into the invoice when it is created, so editing a client later never changes old invoices.
 type Invoice = { clientData?: Client; id: string; client: string; year: number; seq: number; number: string; date: string; amount: number; createdAt: string; updatedAt: string; file?: string; fileType?: string; fileName?: string };
 const FILES_DIR = path.join(DATA_DIR, "files");
@@ -29,7 +37,8 @@ let clientWriting: Promise<unknown> = Promise.resolve();
 async function readClients(): Promise<Client[]> {
   try {
     const list = JSON.parse(await readFile(CLIENTS_FILE, "utf8"));
-    return Array.isArray(list) && list.length ? list : DEFAULT_CLIENTS;
+    if (!Array.isArray(list)) return DEFAULT_CLIENTS;
+    return [...list, ...DEFAULT_CLIENTS.filter((item) => !list.some((saved: Client) => saved.id === item.id))];
   } catch { return DEFAULT_CLIENTS; }
 }
 
@@ -174,7 +183,8 @@ async function clientSave(request: Request) {
   const client: Client = {
     id: id || (list.some((item) => item.id === slug) ? `${slug}-${randomUUID().slice(0, 4)}` : slug),
     label, name, business: text("business", 60), address1: text("address1", 80), address2: text("address2", 80),
-    uid: text("uid", 40) || "N/A", service: text("service", 160) || "Te ardhura nga rrjetet sociale:\nFacebook",
+    uid: text("uid", 40) || "N/A", service: text("service", 300) || "Te ardhura nga rrjetet sociale:\nFacebook",
+    iban: text("iban", 40).replace(/\s+/g, "") || DEFAULT_IBAN,
   };
   const clients = await saveClient(client);
   return json({ client, clients });
@@ -268,8 +278,12 @@ textarea{font:inherit;font-weight:700;color:var(--navy);border:1.5px solid var(-
 #clForm{margin-top:12px}
 .list-head{display:flex;align-items:center;justify-content:space-between;gap:10px;margin:26px 0 10px}.list-head h2{margin:0}
 .upload{background:#fbfaf6;border-radius:16px;padding:18px;margin-bottom:12px}
-.up-grid{display:grid;grid-template-columns:2fr 1fr 1fr 1fr 1fr;gap:12px}
-.up-grid label{margin-bottom:12px}
+.up-grid{display:grid;grid-template-columns:2fr 1.3fr 1fr 1.1fr 1fr;gap:10px;align-items:end;padding:10px 0;border-top:1px solid var(--line)}
+.up-grid .fname{font-size:13px;font-weight:700;color:var(--navy);word-break:break-all;align-self:center}
+.up-grid .fname small{display:block;font-weight:600;margin-top:3px}
+.up-grid .fname .ok{color:#1d7a3a}.up-grid .fname .err{color:#b3261e}
+.up-hint{margin:0 0 6px;color:var(--muted);font-size:13px}
+.up-grid label{margin-bottom:0}
 .up-grid input,.up-grid select{font-size:16px;padding:10px 12px}
 select{font:inherit;font-weight:700;color:var(--navy);border:1.5px solid var(--line);border-radius:12px;background:#fff;width:100%}
 .upload .status{margin:0;align-self:center}
@@ -362,22 +376,19 @@ body.modal-open{overflow:hidden}
         <label>NR. unik identifikues<input id="clUid" placeholder="N/A" autocomplete="off"></label>
         <label>Adresa<input id="clAddress1" placeholder="Colmarer Str. 1" autocomplete="off"></label>
         <label>Qyteti, shteti<input id="clAddress2" placeholder="79576 Weil am Rhein, Gjermani" autocomplete="off"></label>
+        <label class="wide">IBAN (ku paguan ky klient)<input id="clIban" placeholder="GB28MOOW00993554710280" autocomplete="off"></label>
         <label class="wide">Shërbimi (në faturë)<textarea id="clService" rows="2">Te ardhura nga rrjetet sociale:
 Facebook</textarea></label>
       </div>
       <div class="buttons"><button class="btn" type="submit" id="clSave">Ruaj klientin</button><button class="btn ghost" type="button" id="clCancel">Anulo</button><span class="status" id="clStatus"></span></div>
     </form>
     <div class="list-head"><h2>Të gjitha faturat</h2><button class="btn small" type="button" id="upOpen">+ Ngarko faturë</button></div>
-    <form class="upload hidden" id="upForm">
-      <div class="up-grid">
-        <label>Skedari (PDF ose foto)<input id="upFile" type="file" accept="application/pdf,image/jpeg,image/png,image/webp"></label>
-        <label>Klienti<select id="upClient"></select></label>
-        <label>Nr. Faturës<input id="upNumber" placeholder="#05/2026" autocomplete="off"></label>
-        <label>Data<input id="upDate" type="date"></label>
-        <label>Vlera (€)<input id="upAmount" inputmode="decimal" placeholder="3.232" autocomplete="off"></label>
-      </div>
-      <div class="buttons"><button class="btn" type="submit" id="upSave">Ruaj faturën</button><button class="btn ghost" type="button" id="upCancel">Anulo</button><span class="status" id="upStatus"></span></div>
-    </form>
+    <div class="upload hidden" id="upForm">
+      <label>Zgjidh faturat (PDF ose foto) · mund t'i zgjedhësh të gjitha njëherësh<input id="upFile" type="file" multiple accept="application/pdf,image/jpeg,image/png,image/webp"></label>
+      <p class="up-hint">Nga çdo PDF lexohen vetë numri, data, klienti dhe vlera. Kontrolloji më poshtë dhe ndrysho nëse diçka nuk është në rregull.</p>
+      <div id="upRows"></div>
+      <div class="buttons"><button class="btn" type="button" id="upSave" disabled>Ruaj të gjitha</button><button class="btn ghost" type="button" id="upCancel">Mbyll</button><span class="status" id="upStatus"></span></div>
+    </div>
     <div id="list"><div class="empty">Duke i ngarkuar…</div></div>
   </div>
 
@@ -455,7 +466,7 @@ Facebook</textarea></label>
       + '<div class="p-svc">' + esc(c.service) + '</div><div class="p-price">' + esc(amt) + '</div>'
       + '<div class="p-line"></div>'
       + '<div class="p-bank">Të dhënat bankare</div>'
-      + '<div class="p-bank2"><b style="position:static">Account holder</b>: Momenti Media SH.P.K\n<b style="position:static">IBAN</b>: GB28MOOW00993554710280</div>'
+      + '<div class="p-bank2"><b style="position:static">Account holder</b>: Momenti Media SH.P.K\n<b style="position:static">IBAN</b>: ' + esc(c.iban || "GB28MOOW00993554710280") + '</div>'
       + '<div class="p-thanks">Faleminderit që zgjodhët të\nbashkëpunoni me ne!</div>'
       + '<div class="p-note">Vini re: Afati kohor i pageses\nështë 15 ditë</div>'
       + '<div class="p-totk">TOTALI</div><div class="p-total">' + esc(amt) + '</div><div class="p-totline"></div>'
@@ -506,9 +517,6 @@ Facebook</textarea></label>
     $("clients").innerHTML = list.map(function(c){
       return '<button class="client" type="button" data-client="' + esc(c.id) + '"><span class="edit-cl" data-edit-client="' + esc(c.id) + '">Edito</span><b>' + esc(c.label) + '</b><small>' + esc(c.name) + ' · Faturë e re <span class="nextno">' + esc(nextNo) + '</span></small></button>';
     }).join("") + '<button class="client client-add" type="button" id="clOpen">+ Shto klient</button>';
-    var sel = $("upClient"), keep = sel.value;
-    sel.innerHTML = list.map(function(c){ return '<option value="' + esc(c.id) + '">' + esc(c.label) + '</option>'; }).join("");
-    if(keep && CLIENTS[keep]) sel.value = keep;
   }
   function load(){
     fetch("/faturat?list=1", { credentials: "same-origin", cache: "no-store" }).then(function(r){ if(!r.ok) throw 0; return r.json(); })
@@ -575,7 +583,7 @@ Facebook</textarea></label>
     $("clTitle").textContent = c ? "Edito klientin " + c.label : "Klient i ri";
     $("clLabel").value = c ? c.label : ""; $("clName").value = c ? c.name : ""; $("clBusiness").value = c ? c.business : "";
     $("clUid").value = c ? c.uid : "N/A"; $("clAddress1").value = c ? c.address1 : ""; $("clAddress2").value = c ? c.address2 : "";
-    $("clService").value = c ? c.service : "Te ardhura nga rrjetet sociale:\nFacebook"; $("clStatus").textContent = c ? "Ndryshimet vlejnë për faturat e reja; faturat e vjetra mbeten siç janë." : "";
+    $("clIban").value = c ? (c.iban || "") : "GB28MOOW00993554710280"; $("clService").value = c ? c.service : "Te ardhura nga rrjetet sociale:\nFacebook"; $("clStatus").textContent = c ? "Ndryshimet vlejnë për faturat e reja; faturat e vjetra mbeten siç janë." : "";
     $("clForm").classList.remove("hidden"); $("clLabel").focus();
   }
   $("clients").addEventListener("click", function(e){
@@ -588,7 +596,7 @@ Facebook</textarea></label>
   $("clForm").addEventListener("submit", function(e){
     e.preventDefault();
     var body = { id: clientEditing ? clientEditing.id : "", label: $("clLabel").value, name: $("clName").value, business: $("clBusiness").value,
-      uid: $("clUid").value, address1: $("clAddress1").value, address2: $("clAddress2").value, service: $("clService").value };
+      uid: $("clUid").value, address1: $("clAddress1").value, address2: $("clAddress2").value, service: $("clService").value, iban: $("clIban").value };
     if(!body.label.trim() || !body.name.trim()){ $("clStatus").textContent = "Shkruaj emrin e shkurtër dhe emrin e plotë."; return; }
     $("clSave").disabled = true; $("clStatus").textContent = "Duke ruajtur…";
     fetch("/faturat?client=1", { method: "POST", credentials: "same-origin", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) })
@@ -620,30 +628,89 @@ Facebook</textarea></label>
     if(opened.file){ var a = document.createElement("a"); a.href = "/faturat?file=" + encodeURIComponent(opened.id) + "&download=1"; document.body.appendChild(a); a.click(); a.remove(); return; }
     savePdf(opened, this, null);
   });
-  // ---- upload older invoices
-  function showUpload(on){ $("upForm").classList.toggle("hidden", !on); $("upOpen").classList.toggle("hidden", on); if(on){ $("upStatus").textContent = ""; if(!$("upDate").value) $("upDate").value = today(); } }
-  $("upOpen").addEventListener("click", function(){ showUpload(true); $("upFile").focus(); });
-  $("upCancel").addEventListener("click", function(){ $("upForm").reset(); showUpload(false); });
-  $("upFile").addEventListener("change", function(){
-    // Guess the number from names like "05.2026_1.pdf" or "Fatura-07-2026.pdf".
-    var f = this.files[0]; if(!f || $("upNumber").value) return;
-    var m = f.name.match(/(\d{1,3})[._\- ](20\d{2})/);
-    if(m) $("upNumber").value = "#" + m[1].padStart(2, "0") + "/" + m[2];
+  // ---- upload older invoices: several files at once, details read from each PDF (pdf.js)
+  var rows = [];
+  function showUpload(on){ $("upForm").classList.toggle("hidden", !on); $("upOpen").classList.toggle("hidden", on); if(!on){ rows = []; $("upRows").innerHTML = ""; $("upFile").value = ""; $("upSave").disabled = true; $("upStatus").textContent = ""; } }
+  $("upOpen").addEventListener("click", function(){ showUpload(true); $("upFile").click(); });
+  $("upCancel").addEventListener("click", function(){ showUpload(false); });
+  var pdfjs = null;
+  function pdfLib(){
+    return pdfjs || (pdfjs = loadScript("https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js").then(function(){
+      window.pdfjsLib.GlobalWorkerOptions.workerSrc = "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js"; return window.pdfjsLib;
+    }).catch(function(e){ pdfjs = null; throw e; }));
+  }
+  function pdfText(file){
+    return pdfLib().then(function(lib){ return file.arrayBuffer().then(function(buf){ return lib.getDocument({ data: buf }).promise; }); })
+      .then(function(doc){ return doc.getPage(1); }).then(function(page){ return page.getTextContent(); })
+      .then(function(tc){ return tc.items.map(function(it){ return it.str; }).join(" ").replace(/\s+/g, " "); });
+  }
+  // "4535.0", "4853.3", "3.692.50", "3.232", "2557.85", "3.052,31" → cents
+  function euro(t){
+    t = String(t).replace(/[^0-9.,]/g, ""); var m = t.match(/^(.*?)[.,](\d{1,2})$/);
+    return m ? Number(m[1].replace(/[.,]/g, "")) * 100 + Number((m[2] + "0").slice(0, 2)) : Number(t.replace(/[.,]/g, "")) * 100;
+  }
+  function guess(text, name){
+    var g = { number: "", date: "", amount: 0, client: "" };
+    var n = text.match(/#\s*(\d{1,3})\s*\/\s*(20\d{2})/) || String(name).match(/(\d{1,3})[._\- ](20\d{2})/);
+    if(n) g.number = "#" + n[1].padStart(2, "0") + "/" + n[2];
+    var d = text.match(/\b(\d{1,2})[\/.](\d{1,2})[\/.](20\d{2})\b/);
+    if(d) g.date = d[3] + "-" + d[2].padStart(2, "0") + "-" + d[1].padStart(2, "0");
+    var amounts = text.match(/€\s*[\d][\d.,]*/g);
+    if(amounts) g.amount = euro(amounts[amounts.length - 1]);
+    var low = text.toLowerCase();
+    clientList.forEach(function(c){ if(!g.client && low.indexOf(c.name.toLowerCase().replace(/\.$/, "")) >= 0) g.client = c.id; });
+    return g;
+  }
+  function rowHtml(r, i){
+    var opts = clientList.map(function(c){ return '<option value="' + esc(c.id) + '"' + (c.id === r.client ? " selected" : "") + '>' + esc(c.label) + '</option>'; }).join("");
+    var st = r.state === "ok" ? '<small class="ok">U ruajt ✓</small>' : r.state === "err" ? '<small class="err">' + esc(r.error) + '</small>' : r.state === "read" ? '<small>Duke e lexuar…</small>' : "";
+    return '<div class="up-grid" data-row="' + i + '"><div class="fname">' + esc(r.file.name) + st + '</div>'
+      + '<label>Klienti<select data-f="client"><option value="">— zgjidh —</option>' + opts + '</select></label>'
+      + '<label>Nr. Faturës<input data-f="number" value="' + esc(r.number) + '" placeholder="#05/2026"></label>'
+      + '<label>Data<input data-f="date" type="date" value="' + esc(r.date) + '"></label>'
+      + '<label>Vlera (€)<input data-f="amount" inputmode="decimal" value="' + (r.amount ? esc(plain(r.amount)) : "") + '" placeholder="3.232"></label></div>';
+  }
+  function drawRows(){ $("upRows").innerHTML = rows.map(rowHtml).join(""); $("upSave").disabled = !rows.some(function(r){ return r.state !== "ok"; }); }
+  $("upRows").addEventListener("input", function(e){
+    var box = e.target.closest("[data-row]"), f = e.target.getAttribute("data-f"); if(!box || !f) return;
+    var r = rows[Number(box.getAttribute("data-row"))];
+    r[f] = f === "amount" ? cents(e.target.value) : e.target.value;
   });
-  $("upForm").addEventListener("submit", function(e){
-    e.preventDefault();
-    var f = $("upFile").files[0];
-    if(!f){ $("upStatus").textContent = "Zgjidh skedarin."; return; }
-    var amount = cents($("upAmount").value);
-    var data = new FormData();
-    data.append("file", f); data.append("client", $("upClient").value); data.append("number", $("upNumber").value);
-    data.append("date", $("upDate").value); data.append("amount", amount ? String(amount) : "");
-    $("upSave").disabled = true; $("upStatus").textContent = "Duke ngarkuar…";
-    fetch("/faturat?upload=1", { method: "POST", credentials: "same-origin", body: data })
-      .then(function(r){ return r.json().then(function(b){ if(!r.ok) throw new Error(b.error || ""); return b; }); })
-      .then(function(res){ setData(res); $("upForm").reset(); showUpload(false); })
-      .catch(function(err){ $("upStatus").textContent = err.message || "Ngarkimi dështoi."; })
-      .then(function(){ $("upSave").disabled = false; });
+  $("upRows").addEventListener("change", function(e){ var box = e.target.closest("[data-row]"); if(box && e.target.getAttribute("data-f") === "client") rows[Number(box.getAttribute("data-row"))].client = e.target.value; });
+  $("upFile").addEventListener("change", function(){
+    var files = Array.prototype.slice.call(this.files || []);
+    if(!files.length) return;
+    files.sort(function(a, b){ return a.name.localeCompare(b.name, undefined, { numeric: true }); });
+    rows = files.map(function(f){ var g = guess("", f.name); return { file: f, number: g.number, date: "", amount: 0, client: "", state: f.type === "application/pdf" ? "read" : "" }; });
+    drawRows(); $("upStatus").textContent = "";
+    rows.forEach(function(r){
+      if(r.file.type !== "application/pdf") return;
+      pdfText(r.file).then(function(text){ var g = guess(text, r.file.name); r.number = g.number || r.number; r.date = g.date; r.amount = g.amount; r.client = g.client; r.state = ""; })
+        .catch(function(){ r.state = ""; }).then(drawRows);
+    });
+  });
+  $("upSave").addEventListener("click", function(){
+    var btn = this; btn.disabled = true;
+    var todo = rows.filter(function(r){ return r.state !== "ok"; });
+    var chain = Promise.resolve(), done = 0;
+    todo.forEach(function(r){
+      chain = chain.then(function(){
+        $("upStatus").textContent = "Duke ngarkuar " + (++done) + "/" + todo.length + "…";
+        var data = new FormData();
+        data.append("file", r.file); data.append("client", r.client); data.append("number", r.number);
+        data.append("date", r.date); data.append("amount", r.amount ? String(r.amount) : "");
+        return fetch("/faturat?upload=1", { method: "POST", credentials: "same-origin", body: data })
+          .then(function(res){ return res.json().then(function(b){ if(!res.ok) throw new Error(b.error || "Ngarkimi dështoi."); return b; }); })
+          .then(function(res){ r.state = "ok"; setData(res); })
+          .catch(function(err){ r.state = "err"; r.error = err.message || "Ngarkimi dështoi."; })
+          .then(drawRows);
+      });
+    });
+    chain.then(function(){
+      var bad = rows.filter(function(r){ return r.state === "err"; }).length;
+      $("upStatus").textContent = bad ? bad + " fatura nuk u ruajtën — shiko arsyen te secila." : "Të gjitha u ruajtën ✓";
+      if(!bad) setTimeout(function(){ showUpload(false); }, 1500);
+    });
   });
   $("list").addEventListener("click", function(e){
     var id, inv;
