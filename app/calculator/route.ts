@@ -98,9 +98,9 @@ input:focus{border-color:var(--blue);box-shadow:0 0 0 3px rgba(31,58,138,.12)}
 .status{margin-right:auto;font-size:13px;color:var(--muted)}
 .drafts{margin-top:22px}
 .drafts h2{color:#fff4ef;font-size:17px;margin:0 0 10px}
-.draft{display:grid;grid-template-columns:1.3fr repeat(3,1fr) auto;gap:10px;align-items:center;background:var(--paper);border-radius:12px;padding:12px 14px;margin-bottom:8px;font-variant-numeric:tabular-nums;font-size:14px;cursor:pointer;border:2px solid transparent}
+.draft{display:grid;grid-template-columns:1.3fr repeat(4,1fr) auto;gap:10px;align-items:center;background:var(--paper);border-radius:12px;padding:12px 14px;margin-bottom:8px;font-variant-numeric:tabular-nums;font-size:14px;cursor:pointer;border:2px solid transparent}
 .draft:hover,.draft.is-open{border-color:#c9a2a7}
-.draft b{display:block;font-size:15px}.draft small{color:var(--muted)}
+.draft b{display:block;font-size:15px}.draft .tot{font-weight:900;color:var(--blue)}.draft small{color:var(--muted)}
 .draft .k{color:var(--muted);font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.04em;display:block}
 .draft button{padding:6px 10px;font-size:13px}
 .empty{color:#d9c3c0;font-size:14px}
@@ -224,6 +224,7 @@ button.ghost{background:transparent;color:var(--muted);border:1.5px solid var(--
         + '<div><span class="k">' + esc($("n1").value) + '</span>' + fmt(r[0]) + '</div>'
         + '<div><span class="k">' + esc($("n2").value) + '</span>' + fmt(r[1]) + '</div>'
         + '<div><span class="k">' + esc($("n3").value) + '</span>' + fmt(r[2]) + '</div>'
+        + '<div class="tot"><span class="k">Totali</span>' + fmt(cents(d.a) + cents(d.b)) + '</div>'
         + '<div><button class="ghost" type="button" data-del="' + esc(d.id) + '">Fshi</button></div></div>';
     }).join("");
   }
