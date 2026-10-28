@@ -1,0 +1,57 @@
+# Sets up redaksia.momenti.info (nginx + HTTPS). Actions → "Redaksia: setup" → Run workflow.
+# backend: "test" = the test app (port 3100), "live" = the live site (port 3000).
+name: "Redaksia: setup"
+
+on:
+  workflow_dispatch:
+    inputs:
+      backend:
+        description: "test ose live"
+        required: true
+        default: "test"
+        type: choice
+        options: [test, live]
+
+concurrency:
+  group: redaksia-setup
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  setup:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      HOST: root@62.171.174.17
+    steps:
+      - uses: actions/checkout@v4
+      - name: Prepare SSH
+        env:
+          VPS_SSH_KEY: ${{ secrets.VPS_SSH_KEY }}
+          VPS_KNOWN_HOSTS: ${{ secrets.VPS_KNOWN_HOSTS }}
+        run: |
+          install -m 700 -d "$HOME/.ssh"
+          printf '%s\n' "$VPS_SSH_KEY" > "$HOME/.ssh/deploy_key"
+          chmod 600 "$HOME/.ssh/deploy_key"
+          printf '%s\n' "$VPS_KNOWN_HOSTS" > "$HOME/.ssh/known_hosts"
+      - name: Set up redaksia.momenti.info
+        run: |
+          PORT=3100; [ "${{ inputs.backend }}" = "live" ] && PORT=3000
+          SSHOPT="-i $HOME/.ssh/deploy_key -o BatchMode=yes -o StrictHostKeyChecking=yes"
+          scp $SSHOPT ops/redaksia/setup-redaksia-remote.sh "$HOST:/tmp/momenti-redaksia-setup.sh"
+          ssh $SSHOPT "$HOST" "bash /tmp/momenti-redaksia-setup.sh $PORT"
+      - name: Report summary
+        if: always()
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          SSHOPT="-i $HOME/.ssh/deploy_key -o BatchMode=yes -o StrictHostKeyChecking=yes"
+          scp $SSHOPT "$HOST:/tmp/momenti-redaksia-setup.log" /tmp/setup.log || echo "(log-u nuk u mor)" > /tmp/setup.log
+          { echo "Redaksia setup (${{ job.status }}, backend ${{ inputs.backend }})"; echo; echo '```'; tail -n 40 /tmp/setup.log; echo '```'; } > /tmp/report.md
+          gh issue create --repo "$GITHUB_REPOSITORY" --title "Redaksia setup: ${{ job.status }}" --body-file /tmp/report.md || true
+      - name: Remove SSH key
+        if: always()
+        run: rm -f "$HOME/.ssh/deploy_key"
