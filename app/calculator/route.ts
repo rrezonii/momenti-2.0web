@@ -1,5 +1,5 @@
 import { randomUUID, timingSafeEqual } from "node:crypto";
-import { hasSession, isRedaksiaHost, loginRedirect } from "@/lib/redaksia/session";
+import { hasSession, isRedaksiaHost, loginRedirect, renewing } from "@/lib/redaksia/session";
 import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import path from "node:path";
 
@@ -207,6 +207,11 @@ body.modal-open{overflow:hidden}
 <script>
 (function(){
   var $ = function(id){ return document.getElementById(id); };
+  // Session ended (10 minutes without activity) on redaksia.momenti.info: back to the login screen.
+  if(location.hostname.indexOf("redaksia.") === 0){
+    var nativeFetch = window.fetch.bind(window);
+    window.fetch = function(){ return nativeFetch.apply(null, arguments).then(function(r){ if(r.status === 401){ location.href = "/?next=" + encodeURIComponent(location.pathname); } return r; }); };
+  }
   if(location.hostname.indexOf("redaksia.") === 0) $("portalLink").hidden = false;
   // Accepts 4800,91 · 4800.91 · 4.800,91 · 4,800.91 → cents (integer, no float drift).
   function cents(text){
@@ -396,7 +401,7 @@ function sameOrigin(request: Request) {
 
 const json = (body: unknown, status = 200) => Response.json(body, { status, headers: { "Cache-Control": "no-store", "X-Robots-Tag": "noindex, nofollow" } });
 
-export async function POST(request: Request) {
+async function handlePOST(request: Request) {
   if (!authorized(request)) return denied(request);
   if (!sameOrigin(request)) return json({ error: "Kërkesë e pavlefshme." }, 403);
   const body = await request.json().catch(() => null) as Record<string, unknown> | null;
@@ -418,7 +423,7 @@ export async function POST(request: Request) {
   return json({ id: draft.id, drafts });
 }
 
-export async function DELETE(request: Request) {
+async function handleDELETE(request: Request) {
   if (!authorized(request)) return denied(request);
   if (!sameOrigin(request)) return json({ error: "Kërkesë e pavlefshme." }, 403);
   const id = new URL(request.url).searchParams.get("id") ?? "";
@@ -426,7 +431,7 @@ export async function DELETE(request: Request) {
   return json({ drafts });
 }
 
-export async function GET(request: Request) {
+async function handleGET(request: Request) {
   if (!authorized(request)) return denied(request);
   if (new URL(request.url).searchParams.has("drafts")) return json(await readDrafts());
   if (!authorized(request)) {
@@ -455,3 +460,7 @@ function portalDenied(request: Request) {
   if (request.method === "GET" && accept.includes("text/html")) return loginRedirect(request);
   return Response.json({ error: "Sesioni ka përfunduar. Hyr përsëri." }, { status: 401, headers: { "Cache-Control": "no-store" } });
 }
+
+export const GET = renewing(handleGET);
+export const POST = renewing(handlePOST);
+export const DELETE = renewing(handleDELETE);

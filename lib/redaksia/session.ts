@@ -1,12 +1,13 @@
 import { createHmac, timingSafeEqual } from "node:crypto";
 
 // Login for the newsroom portal (redaksia.momenti.info). A signed, HttpOnly cookie keeps the
-// session; changing the password (env REDAKSIA_PASSWORD) logs everyone out.
+// session for 10 minutes; every request while logged in renews it (so it ends after 10 idle minutes).
+// Changing the password (env REDAKSIA_PASSWORD) logs everyone out.
 export const SESSION_COOKIE = "redaksia_session";
 const USER = process.env.REDAKSIA_USER?.trim() || "redaksia";
 const PASSWORDS = (process.env.REDAKSIA_PASSWORD?.trim() || "Rrezoni2026").split(",").map((value) => value.trim()).filter(Boolean);
 const SECRET = process.env.REDAKSIA_SECRET?.trim() || `momenti-redaksia:${USER}:${PASSWORDS.join(",")}`;
-const MAX_AGE = 30 * 24 * 60 * 60; // 30 days
+const MAX_AGE = 10 * 60; // 10 minutes without activity, then log in again
 
 function same(a: string, b: string) {
   const left = Buffer.from(a);
@@ -47,4 +48,15 @@ export function loginRedirect(request: Request) {
   const url = new URL(request.url);
   const next = url.pathname;
   return new Response(null, { status: 303, headers: { Location: `/?next=${encodeURIComponent(next)}`, "Cache-Control": "no-store" } });
+}
+
+// Wrap a route handler: while the session is valid, each response renews the 10-minute cookie.
+export function renewing(handler: (request: Request) => Promise<Response>) {
+  return async (request: Request) => {
+    const response = await handler(request);
+    if (!hasSession(request)) return response;
+    const headers = new Headers(response.headers);
+    if (!headers.has("Set-Cookie")) headers.append("Set-Cookie", sessionCookie());
+    return new Response(response.body, { status: response.status, statusText: response.statusText, headers });
+  };
 }

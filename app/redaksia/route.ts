@@ -1,5 +1,5 @@
 import { LOGO } from "@/lib/invoices/assets";
-import { checkLogin, clearSessionCookie, hasSession, isRedaksiaHost, sessionCookie } from "@/lib/redaksia/session";
+import { checkLogin, clearSessionCookie, hasSession, isRedaksiaHost, renewing, sessionCookie } from "@/lib/redaksia/session";
 
 // Newsroom portal: redaksia.momenti.info/ (nginx serves this route at "/").
 // Login screen, then two tiles: Faturat and Kalkulatori.
@@ -16,7 +16,7 @@ const html = (body: string, status = 200, extra: Record<string, string> = {}) =>
   "Content-Type": "text/html; charset=utf-8", "Cache-Control": "private, no-store", "X-Robots-Tag": "noindex, nofollow",
   "X-Content-Type-Options": "nosniff", "X-Frame-Options": "DENY", ...extra } });
 
-export async function GET(request: Request) {
+async function handleGET(request: Request) {
   const url = new URL(request.url);
   if (url.searchParams.has("logout")) {
     return new Response(null, { status: 303, headers: { Location: home(request), "Set-Cookie": clearSessionCookie(), "Cache-Control": "no-store" } });
@@ -136,3 +136,5 @@ ${body}
 </body>
 </html>`;
 }
+
+export const GET = renewing(handleGET);

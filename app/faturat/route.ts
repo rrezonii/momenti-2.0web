@@ -1,5 +1,5 @@
 import { randomUUID, timingSafeEqual } from "node:crypto";
-import { hasSession, isRedaksiaHost, loginRedirect } from "@/lib/redaksia/session";
+import { hasSession, isRedaksiaHost, loginRedirect, renewing } from "@/lib/redaksia/session";
 import { mkdir, readFile, rename, unlink, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { LOGO, STAMP } from "@/lib/invoices/assets";
@@ -115,7 +115,7 @@ const sorted = (list: Invoice[]) => [...list].sort((a, b) => b.year - a.year || 
 const json = (body: unknown, status = 200) => Response.json(body, { status, headers: { "Cache-Control": "no-store", "X-Robots-Tag": "noindex, nofollow" } });
 const denied = (request: Request) => isRedaksiaHost(request) ? portalDenied(request) : new Response("Kërkohet hyrja.", { status: 401, headers: { "WWW-Authenticate": 'Basic realm="Momenti Faturat", charset="UTF-8"', "Cache-Control": "no-store" } });
 
-export async function GET(request: Request) {
+async function handleGET(request: Request) {
   if (!authorized(request)) return denied(request);
   const params = new URL(request.url).searchParams;
   const fileId = params.get("file");
@@ -140,7 +140,7 @@ export async function GET(request: Request) {
   });
 }
 
-export async function POST(request: Request) {
+async function handlePOST(request: Request) {
   if (!authorized(request)) return denied(request);
   if (!sameOrigin(request)) return json({ error: "Kërkesë e pavlefshme." }, 403);
   if (new URL(request.url).searchParams.has("upload")) return upload(request);
@@ -251,7 +251,7 @@ async function upload(request: Request) {
   return json({ invoice: result, invoices: sorted(list), next: formatNumber(nextSeq(list, thisYear), thisYear) });
 }
 
-export async function DELETE(request: Request) {
+async function handleDELETE(request: Request) {
   if (!authorized(request)) return denied(request);
   if (!sameOrigin(request)) return json({ error: "Kërkesë e pavlefshme." }, 403);
   const id = new URL(request.url).searchParams.get("id") ?? "";
@@ -478,6 +478,11 @@ Facebook</textarea></label>
 <script>
 (function(){
   var $ = function(id){ return document.getElementById(id); };
+  // Session ended (10 minutes without activity) on redaksia.momenti.info: back to the login screen.
+  if(location.hostname.indexOf("redaksia.") === 0){
+    var nativeFetch = window.fetch.bind(window);
+    window.fetch = function(){ return nativeFetch.apply(null, arguments).then(function(r){ if(r.status === 401){ location.href = "/?next=" + encodeURIComponent(location.pathname); } return r; }); };
+  }
   if(location.hostname.indexOf("redaksia.") === 0) $("portalLink").hidden = false;
   var LOGO = "__LOGO__", STAMP = "__STAMP__";
   var CLIENTS = {}, clientList = [];
@@ -825,3 +830,7 @@ function portalDenied(request: Request) {
   if (request.method === "GET" && accept.includes("text/html")) return loginRedirect(request);
   return Response.json({ error: "Sesioni ka përfunduar. Hyr përsëri." }, { status: 401, headers: { "Cache-Control": "no-store" } });
 }
+
+export const GET = renewing(handleGET);
+export const POST = renewing(handlePOST);
+export const DELETE = renewing(handleDELETE);
