@@ -39,7 +39,9 @@ function prunaReason(value: unknown) {
 // The background description stays fixed so every post gets the same recognisable backdrop.
 const BW_PROMPT = "Retouch image 1 as a dramatic, high-quality portrait photograph. Keep the photo in colour: "
   + "slightly desaturated, natural warm skin tones, strong contrast and local clarity, crisp detail in face, hair and clothing, deep rich shadows, dramatic soft side light. "
-  + "Replace the background with a deep slate-blue studio wall (cool steel blue-grey, no green or teal tint) with a soft subtle mottled texture and gentle vignette, slightly out of focus behind the person. "
+  + "Replace the background with a deep navy-blue grunge backdrop (rich dark blue, no green or teal tint): a fine rough concrete-like speckled texture, "
+  + "several broad soft diagonal light streaks slanting from the upper left to the lower right in slightly lighter blue, darker toward the edges and bottom. "
+  + "The person is cleanly cut out and sits sharply in front of this backdrop, with soft natural edges. "
   + "Over the whole image add only a subtle analog film look: fine even film grain and a few tiny light dust specks. No paper texture, no creases, no folds, no cracks, no torn or worn edges. "
   + "Keep every person exactly the same: same face, identity, expression, pose, clothing, framing and composition. "
   + "The result must be a clean photo only: absolutely no text, no words, no letters, no titles, no captions, no watermark, no logos, no borders and no new objects anywhere in the image.";
@@ -151,7 +153,7 @@ export async function POST(request: Request) {
     const params = new URL(request.url).searchParams;
     const target = params.get("target") === "2" ? 2 : 4;
     const style = params.get("style") === "bw" ? "bw" : null;
-    const key = createHash("sha256").update(style ? "v4-style-editorial" : `v3-target-${target}`).update(request.headers.get("cookie") ?? "").update(input).digest("hex");
+    const key = createHash("sha256").update(style ? "v5-style-editorial" : `v3-target-${target}`).update(request.headers.get("cookie") ?? "").update(input).digest("hex");
     for (const [key, job] of jobs) if (job.expires < Date.now()) jobs.delete(key);
     let job = jobs.get(key);
     if (!job) {
