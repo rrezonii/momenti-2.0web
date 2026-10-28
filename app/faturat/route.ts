@@ -13,13 +13,40 @@ const USER = process.env.INVOICES_USER?.trim() || process.env.CALCULATOR_USER?.t
 const PASS = process.env.INVOICES_PASSWORD?.trim() || process.env.CALCULATOR_PASSWORD?.trim() || "genti";
 // Last invoice number made before this page existed (#06/2026), so the first one here is #07/2026.
 const START: Record<number, number> = { 2026: 6 };
-const CLIENTS = ["airtiketa"];
 
 const DATA_DIR = process.env.INVOICES_DATA_DIR || path.join(process.cwd(), "data", "invoices");
 const FILE = path.join(DATA_DIR, "invoices.json");
 // Uploaded = an older invoice made elsewhere (PDF/photo kept as a file); it still counts for the numbering.
-type Invoice = { id: string; client: string; year: number; seq: number; number: string; date: string; amount: number; createdAt: string; updatedAt: string; file?: string; fileType?: string; fileName?: string };
+type Client = { id: string; label: string; name: string; business: string; address1: string; address2: string; uid: string; service: string };
+const DEFAULT_CLIENTS: Client[] = [{ id: "airtiketa", label: "AIRTIKETA", name: "Airtiketa GmbH", business: "HRB 728839", address1: "Colmarer Str. 1",
+  address2: "79576 Weil am Rhein, Gjermani", uid: "N/A", service: "Te ardhura nga rrjetet sociale:\nFacebook" }];
+// clientData = the client's details copied into the invoice when it is created, so editing a client later never changes old invoices.
+type Invoice = { clientData?: Client; id: string; client: string; year: number; seq: number; number: string; date: string; amount: number; createdAt: string; updatedAt: string; file?: string; fileType?: string; fileName?: string };
 const FILES_DIR = path.join(DATA_DIR, "files");
+const CLIENTS_FILE = path.join(DATA_DIR, "clients.json");
+let clientWriting: Promise<unknown> = Promise.resolve();
+
+async function readClients(): Promise<Client[]> {
+  try {
+    const list = JSON.parse(await readFile(CLIENTS_FILE, "utf8"));
+    return Array.isArray(list) && list.length ? list : DEFAULT_CLIENTS;
+  } catch { return DEFAULT_CLIENTS; }
+}
+
+function saveClient(client: Client) {
+  const next = clientWriting.then(async () => {
+    const list = await readClients();
+    const exists = list.some((item) => item.id === client.id);
+    const updated = exists ? list.map((item) => item.id === client.id ? client : item) : [...list, client];
+    await mkdir(DATA_DIR, { recursive: true });
+    const temp = `${CLIENTS_FILE}.${process.pid}.tmp`;
+    await writeFile(temp, JSON.stringify(updated, null, 1));
+    await rename(temp, CLIENTS_FILE);
+    return updated;
+  });
+  clientWriting = next.catch(() => undefined);
+  return next;
+}
 const UPLOAD_TYPES: Record<string, string> = { "application/pdf": "pdf", "image/jpeg": "jpg", "image/png": "png", "image/webp": "webp" };
 const MAX_UPLOAD = 15 * 1024 * 1024;
 let writing: Promise<unknown> = Promise.resolve();
@@ -95,7 +122,7 @@ export async function GET(request: Request) {
   if (params.has("list")) {
     const list = await readInvoices();
     const year = new Date().getFullYear();
-    return json({ invoices: sorted(list), next: formatNumber(nextSeq(list, year), year) });
+    return json({ invoices: sorted(list), clients: await readClients(), next: formatNumber(nextSeq(list, year), year) });
   }
   return new Response(PAGE.replace("__LOGO__", LOGO).replace("__STAMP__", STAMP), {
     headers: { "Content-Type": "text/html; charset=utf-8", "Cache-Control": "private, no-store", "X-Robots-Tag": "noindex, nofollow", "X-Content-Type-Options": "nosniff" },
@@ -106,11 +133,14 @@ export async function POST(request: Request) {
   if (!authorized(request)) return denied();
   if (!sameOrigin(request)) return json({ error: "Kërkesë e pavlefshme." }, 403);
   if (new URL(request.url).searchParams.has("upload")) return upload(request);
+  if (new URL(request.url).searchParams.has("client")) return clientSave(request);
   const body = await request.json().catch(() => null) as Record<string, unknown> | null;
   const date = validDate(body?.date);
   const amount = validAmount(body?.amount);
   const id = typeof body?.id === "string" ? body.id : "";
-  const client = typeof body?.client === "string" && CLIENTS.includes(body.client) ? body.client : null;
+  const clients = await readClients();
+  const clientData = clients.find((item) => item.id === body?.client) ?? null;
+  const client = clientData?.id ?? null;
   if (!date || !amount || (!id && !client)) return json({ error: "Plotëso vlerën dhe datën." }, 400);
   const now = new Date().toISOString();
   const { list, result } = await update((current) => {
@@ -123,12 +153,31 @@ export async function POST(request: Request) {
     }
     const year = Number(date.slice(0, 4));
     const seq = nextSeq(current, year);
-    const invoice: Invoice = { id: randomUUID(), client: client!, year, seq, number: formatNumber(seq, year), date, amount, createdAt: now, updatedAt: now };
+    const invoice: Invoice = { id: randomUUID(), client: client!, clientData: clientData!, year, seq, number: formatNumber(seq, year), date, amount, createdAt: now, updatedAt: now };
     return { list: [...current, invoice], result: invoice };
   });
   if (!result) return json({ error: "Fatura nuk u gjet." }, 404);
   const year = new Date().getFullYear();
   return json({ invoice: result, invoices: sorted(list), next: formatNumber(nextSeq(list, year), year) });
+}
+
+async function clientSave(request: Request) {
+  const body = await request.json().catch(() => null) as Record<string, unknown> | null;
+  const text = (key: string, max: number) => typeof body?.[key] === "string" ? (body[key] as string).replace(/\r/g, "").trim().slice(0, max) : "";
+  const label = text("label", 40).toUpperCase();
+  const name = text("name", 80);
+  if (!label || !name) return json({ error: "Shkruaj emrin e klientit." }, 400);
+  const list = await readClients();
+  const id = text("id", 60);
+  if (id && !list.some((item) => item.id === id)) return json({ error: "Klienti nuk u gjet." }, 404);
+  const slug = label.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "") || "klient";
+  const client: Client = {
+    id: id || (list.some((item) => item.id === slug) ? `${slug}-${randomUUID().slice(0, 4)}` : slug),
+    label, name, business: text("business", 60), address1: text("address1", 80), address2: text("address2", 80),
+    uid: text("uid", 40) || "N/A", service: text("service", 160) || "Te ardhura nga rrjetet sociale:\nFacebook",
+  };
+  const clients = await saveClient(client);
+  return json({ client, clients });
 }
 
 async function upload(request: Request) {
@@ -143,7 +192,7 @@ async function upload(request: Request) {
   const ext = UPLOAD_TYPES[file.type];
   if (!ext) return json({ error: "Lejohen vetëm PDF, JPG, PNG ose WebP." }, 415);
   if (file.size > MAX_UPLOAD) return json({ error: "Skedari kalon kufirin 15 MB." }, 413);
-  if (!CLIENTS.includes(client)) return json({ error: "Zgjidh klientin." }, 400);
+  if (!(await readClients()).some((item) => item.id === client)) return json({ error: "Zgjidh klientin." }, 400);
   if (!match) return json({ error: "Shkruaj numrin e faturës, p.sh. #05/2026." }, 400);
   if (!date) return json({ error: "Zgjidh datën e faturës." }, 400);
   if (amount === null) return json({ error: "Vlera nuk është e saktë." }, 400);
@@ -208,6 +257,15 @@ h2{color:#fff4ef;font-size:17px;margin:26px 0 10px}
 .inv .amt{font-weight:800;text-align:right}
 .inv .acts{display:flex;gap:6px;justify-content:flex-end}
 .empty{color:#d9c3c0;font-size:14px}
+.client-add{background:transparent;border:2px dashed rgba(255,214,219,.35);color:#ffd9dd;display:flex;align-items:center;justify-content:center;font-weight:700;font-size:16px;min-height:86px}
+.client-add:hover{border-color:#ffb4bb}
+.client .edit-cl{float:right;font-size:12px;color:var(--muted);font-weight:600;text-decoration:underline}
+.cl-title{margin:0 0 12px;color:var(--red);font-size:18px}
+.cl-grid{display:grid;grid-template-columns:repeat(2,1fr);gap:0 12px}
+.cl-grid .wide{grid-column:1/-1}
+.cl-grid input,.cl-grid textarea{font-size:16px;padding:10px 12px}
+textarea{font:inherit;font-weight:700;color:var(--navy);border:1.5px solid var(--line);border-radius:12px;background:#fff;width:100%;resize:vertical;outline:none}
+#clForm{margin-top:12px}
 .list-head{display:flex;align-items:center;justify-content:space-between;gap:10px;margin:26px 0 10px}.list-head h2{margin:0}
 .upload{background:#fbfaf6;border-radius:16px;padding:18px;margin-bottom:12px}
 .up-grid{display:grid;grid-template-columns:2fr 1fr 1fr 1fr 1fr;gap:12px}
@@ -293,14 +351,27 @@ body.modal-open{overflow:hidden}
 
   <div id="home">
     <h2>Klientët</h2>
-    <div class="clients">
-      <button class="client" type="button" data-client="airtiketa"><b>AIRTIKETA</b><small>Airtiketa GmbH · Faturë e re <span class="nextno"></span></small></button>
+    <div class="clients" id="clients">
     </div>
+    <form class="upload hidden" id="clForm">
+      <h3 class="cl-title" id="clTitle">Klient i ri</h3>
+      <div class="cl-grid">
+        <label>Emri i shkurtër<input id="clLabel" placeholder="AIRTIKETA" autocomplete="off"></label>
+        <label>Emri i plotë (në faturë)<input id="clName" placeholder="Airtiketa GmbH" autocomplete="off"></label>
+        <label>Nr. Biznesit<input id="clBusiness" placeholder="HRB 728839" autocomplete="off"></label>
+        <label>NR. unik identifikues<input id="clUid" placeholder="N/A" autocomplete="off"></label>
+        <label>Adresa<input id="clAddress1" placeholder="Colmarer Str. 1" autocomplete="off"></label>
+        <label>Qyteti, shteti<input id="clAddress2" placeholder="79576 Weil am Rhein, Gjermani" autocomplete="off"></label>
+        <label class="wide">Shërbimi (në faturë)<textarea id="clService" rows="2">Te ardhura nga rrjetet sociale:
+Facebook</textarea></label>
+      </div>
+      <div class="buttons"><button class="btn" type="submit" id="clSave">Ruaj klientin</button><button class="btn ghost" type="button" id="clCancel">Anulo</button><span class="status" id="clStatus"></span></div>
+    </form>
     <div class="list-head"><h2>Të gjitha faturat</h2><button class="btn small" type="button" id="upOpen">+ Ngarko faturë</button></div>
     <form class="upload hidden" id="upForm">
       <div class="up-grid">
         <label>Skedari (PDF ose foto)<input id="upFile" type="file" accept="application/pdf,image/jpeg,image/png,image/webp"></label>
-        <label>Klienti<select id="upClient"><option value="airtiketa">AIRTIKETA</option></select></label>
+        <label>Klienti<select id="upClient"></select></label>
         <label>Nr. Faturës<input id="upNumber" placeholder="#05/2026" autocomplete="off"></label>
         <label>Data<input id="upDate" type="date"></label>
         <label>Vlera (€)<input id="upAmount" inputmode="decimal" placeholder="3.232" autocomplete="off"></label>
@@ -344,10 +415,9 @@ body.modal-open{overflow:hidden}
 (function(){
   var $ = function(id){ return document.getElementById(id); };
   var LOGO = "__LOGO__", STAMP = "__STAMP__";
-  var CLIENTS = {
-    airtiketa: { name: "Airtiketa GmbH", label: "AIRTIKETA", lines: "Airtiketa GmbH\nNr. Biznesit: HRB 728839\nColmarer Str. 1\n79576 Weil am Rhein, Gjermani",
-      service: "Te ardhura nga rrjetet sociale:\nFacebook", uid: "N/A" }
-  };
+  var CLIENTS = {}, clientList = [];
+  function lines(c){ return [c.name, c.business ? "Nr. Biznesit: " + c.business : "", c.address1, c.address2].filter(Boolean).join("\n"); }
+  function clientOf(inv){ return inv.clientData || CLIENTS[inv.client] || { label: inv.client, name: inv.client, service: "", uid: "N/A" }; }
   var invoices = [], nextNo = "", editing = null, editClient = "airtiketa";
   function esc(t){ return String(t).replace(/[&<>"]/g, function(c){ return {"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]; }); }
   function cents(text){
@@ -366,7 +436,7 @@ body.modal-open{overflow:hidden}
   function today(){ var d = new Date(); return d.getFullYear() + "-" + String(d.getMonth()+1).padStart(2,"0") + "-" + String(d.getDate()).padStart(2,"0"); }
 
   function paperHtml(inv){
-    var c = CLIENTS[inv.client] || CLIENTS.airtiketa, amt = inv.amount ? money(inv.amount) : "€ —";
+    var c = clientOf(inv), amt = inv.amount ? money(inv.amount) : "€ —";
     return '<div class="paper">'
       + '<div class="p-band"></div><div class="p-company">Momenti Media SH.P.K</div><img class="p-logo" src="' + LOGO + '" alt="">'
       + '<svg class="p-title" viewBox="0 0 518 140"><text x="0" y="132" textLength="518" lengthAdjust="spacingAndGlyphs" font-family="Outfit, Arial, sans-serif" font-weight="800" font-size="158" fill="#9b0019">FATURË</text></svg>'
@@ -376,7 +446,7 @@ body.modal-open{overflow:hidden}
       + '<div class="p-ul" style="left:725px;top:486px;width:116px"></div><div class="p-ul" style="left:980px;top:486px;width:350px"></div>'
       + '<div class="p-k" style="top:518px">Data</div><div class="p-v" style="top:518px">' + esc(dmy(inv.date)) + '</div>'
       + '<div class="p-ul" style="left:725px;top:555px;width:116px"></div><div class="p-ul" style="left:980px;top:555px;width:350px"></div>'
-      + '<div class="p-to">Faturë për:\n' + esc(c.lines) + '</div>'
+      + '<div class="p-to">Faturë për:\n' + esc(lines(c)) + '</div>'
       + '<div class="p-by">Faturoi</div><div class="p-ul" style="left:725px;top:645px;width:116px"></div>'
       + '<div class="p-by2">Emri:<span style="left:128px;top:0">Momenti Media SH.P.K</span></div>'
       + '<div class="p-addr">Adresa: GURSEL DHE BAJRAM\nSYLEJMANI, 274</div>'
@@ -422,7 +492,7 @@ body.modal-open{overflow:hidden}
       .then(function(canvas){
         var pdf = new window.jspdf.jsPDF({ unit: "mm", format: "a4", orientation: "portrait" });
         pdf.addImage(canvas.toDataURL("image/jpeg", 0.95), "JPEG", 0, 0, 210, 297);
-        pdf.save("Fatura-" + String(inv.number || "e-re").replace(/[^0-9A-Za-z]+/g, "-").replace(/^-|-$/g, "") + "-" + (CLIENTS[inv.client] || {}).label + ".pdf");
+        pdf.save("Fatura-" + String(inv.number || "e-re").replace(/[^0-9A-Za-z]+/g, "-").replace(/^-|-$/g, "") + "-" + String(clientOf(inv).label).replace(/[^0-9A-Za-z]+/g, "-") + ".pdf");
         if(statusEl) statusEl.textContent = "PDF u ruajt ✓";
       })
       .catch(function(){ if(statusEl) statusEl.textContent = "PDF nuk u krijua. Kontrollo internetin dhe provo përsëri."; })
@@ -430,7 +500,16 @@ body.modal-open{overflow:hidden}
   }
 
   // ---- data
-  function setData(res){ invoices = res.invoices || []; nextNo = res.next || ""; showList(); }
+  function setData(res){ invoices = res.invoices || []; nextNo = res.next || ""; if(res.clients) setClients(res.clients); showList(); }
+  function setClients(list){
+    clientList = list; CLIENTS = {}; list.forEach(function(c){ CLIENTS[c.id] = c; });
+    $("clients").innerHTML = list.map(function(c){
+      return '<button class="client" type="button" data-client="' + esc(c.id) + '"><span class="edit-cl" data-edit-client="' + esc(c.id) + '">Edito</span><b>' + esc(c.label) + '</b><small>' + esc(c.name) + ' · Faturë e re <span class="nextno">' + esc(nextNo) + '</span></small></button>';
+    }).join("") + '<button class="client client-add" type="button" id="clOpen">+ Shto klient</button>';
+    var sel = $("upClient"), keep = sel.value;
+    sel.innerHTML = list.map(function(c){ return '<option value="' + esc(c.id) + '">' + esc(c.label) + '</option>'; }).join("");
+    if(keep && CLIENTS[keep]) sel.value = keep;
+  }
   function load(){
     fetch("/faturat?list=1", { credentials: "same-origin", cache: "no-store" }).then(function(r){ if(!r.ok) throw 0; return r.json(); })
       .then(setData).catch(function(){ $("list").innerHTML = '<div class="empty">Faturat nuk u ngarkuan. Rifresko faqen.</div>'; });
@@ -439,7 +518,7 @@ body.modal-open{overflow:hidden}
     document.querySelectorAll(".nextno").forEach(function(el){ el.textContent = nextNo; });
     if(!invoices.length){ $("list").innerHTML = '<div class="empty">Ende nuk ka fatura. Kliko AIRTIKETA për të krijuar të parën.</div>'; return; }
     $("list").innerHTML = invoices.map(function(inv){
-      var c = CLIENTS[inv.client] || { label: inv.client };
+      var c = clientOf(inv);
       return '<div class="inv" data-id="' + esc(inv.id) + '"><span class="no">' + esc(inv.number) + '</span><span>' + esc(c.label) + (inv.file ? '<span class="tag">E NGARKUAR</span>' : '') + '</span><span class="date">' + esc(dmy(inv.date)) + '</span><span class="amt">' + (inv.amount ? esc(money(inv.amount)) : "—") + '</span>'
         + '<span class="acts">' + (inv.file ? '' : '<button class="btn ghost small" type="button" data-edit="' + esc(inv.id) + '">Edito</button>') + '<button class="btn ghost small" type="button" data-del="' + esc(inv.id) + '">Fshi</button></span></div>';
     }).join("");
@@ -447,11 +526,11 @@ body.modal-open{overflow:hidden}
 
   // ---- views
   function show(view){ $("home").classList.toggle("hidden", view !== "home"); $("edit").classList.toggle("hidden", view !== "edit"); $("back").classList.toggle("hidden", view === "home"); window.scrollTo(0, 0); }
-  function draft(){ return { client: editClient, number: editing ? editing.number : nextNo, date: $("edDate").value || today(), amount: cents($("edAmount").value) }; }
+  function draft(){ return { client: editClient, clientData: editing ? editing.clientData : CLIENTS[editClient], number: editing ? editing.number : nextNo, date: $("edDate").value || today(), amount: cents($("edAmount").value) }; }
   function refresh(){ mount($("edPaper"), draft()); }
   function openEditor(inv, client){
     editing = inv || null; editClient = inv ? inv.client : client;
-    var c = CLIENTS[editClient];
+    var c = inv ? clientOf(inv) : CLIENTS[editClient];
     $("edTitle").textContent = c.label + (inv ? " · Edito " + inv.number : " · Faturë e re");
     $("edHint").textContent = inv ? "Numri i faturës mbetet " + inv.number + ". Ndrysho vlerën ose datën." : "Ndrysho vetëm vlerën. Numri i faturës jepet automatikisht.";
     $("edNumber").textContent = inv ? inv.number : (nextNo + " (automatik)");
@@ -476,7 +555,7 @@ body.modal-open{overflow:hidden}
       .then(function(r){ return r.json().then(function(b){ if(!r.ok) throw new Error(b.error || ""); return b; }); })
       .then(function(res){
         setData(res); editing = res.invoice;
-        $("edTitle").textContent = CLIENTS[editClient].label + " · " + res.invoice.number;
+        $("edTitle").textContent = clientOf(res.invoice).label + " · " + res.invoice.number;
         $("edNumber").textContent = res.invoice.number; refresh();
         $("edStatus").textContent = "Fatura " + res.invoice.number + " u ruajt ✓";
       })
@@ -489,11 +568,39 @@ body.modal-open{overflow:hidden}
     savePdf(d, this, $("edStatus"));
   });
   $("back").addEventListener("click", function(){ show("home"); });
-  document.querySelectorAll("[data-client]").forEach(function(btn){ btn.addEventListener("click", function(){ openEditor(null, btn.getAttribute("data-client")); }); });
+  // ---- clients
+  var clientEditing = null;
+  function openClientForm(c){
+    clientEditing = c || null;
+    $("clTitle").textContent = c ? "Edito klientin " + c.label : "Klient i ri";
+    $("clLabel").value = c ? c.label : ""; $("clName").value = c ? c.name : ""; $("clBusiness").value = c ? c.business : "";
+    $("clUid").value = c ? c.uid : "N/A"; $("clAddress1").value = c ? c.address1 : ""; $("clAddress2").value = c ? c.address2 : "";
+    $("clService").value = c ? c.service : "Te ardhura nga rrjetet sociale:\nFacebook"; $("clStatus").textContent = c ? "Ndryshimet vlejnë për faturat e reja; faturat e vjetra mbeten siç janë." : "";
+    $("clForm").classList.remove("hidden"); $("clLabel").focus();
+  }
+  $("clients").addEventListener("click", function(e){
+    var ed = e.target.closest("[data-edit-client]");
+    if(ed){ e.stopPropagation(); openClientForm(CLIENTS[ed.getAttribute("data-edit-client")]); return; }
+    if(e.target.closest("#clOpen")){ openClientForm(null); return; }
+    var btn = e.target.closest("[data-client]"); if(btn) openEditor(null, btn.getAttribute("data-client"));
+  });
+  $("clCancel").addEventListener("click", function(){ $("clForm").classList.add("hidden"); });
+  $("clForm").addEventListener("submit", function(e){
+    e.preventDefault();
+    var body = { id: clientEditing ? clientEditing.id : "", label: $("clLabel").value, name: $("clName").value, business: $("clBusiness").value,
+      uid: $("clUid").value, address1: $("clAddress1").value, address2: $("clAddress2").value, service: $("clService").value };
+    if(!body.label.trim() || !body.name.trim()){ $("clStatus").textContent = "Shkruaj emrin e shkurtër dhe emrin e plotë."; return; }
+    $("clSave").disabled = true; $("clStatus").textContent = "Duke ruajtur…";
+    fetch("/faturat?client=1", { method: "POST", credentials: "same-origin", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) })
+      .then(function(r){ return r.json().then(function(b){ if(!r.ok) throw new Error(b.error || ""); return b; }); })
+      .then(function(res){ setClients(res.clients); $("clForm").classList.add("hidden"); })
+      .catch(function(err){ $("clStatus").textContent = err.message || "Ruajtja dështoi."; })
+      .then(function(){ $("clSave").disabled = false; });
+  });
 
   var opened = null;
   function openModal(inv){
-    opened = inv; $("mTitle").textContent = inv.number + " · " + (CLIENTS[inv.client] || {}).label + (inv.file ? " · e ngarkuar" : "");
+    opened = inv; $("mTitle").textContent = inv.number + " · " + clientOf(inv).label + (inv.file ? " · e ngarkuar" : "");
     $("mEdit").classList.toggle("hidden", Boolean(inv.file));
     $("mPdf").textContent = inv.file ? "Shkarko" : "Ruaj PDF";
     $("modal").classList.add("is-open"); document.body.classList.add("modal-open");
