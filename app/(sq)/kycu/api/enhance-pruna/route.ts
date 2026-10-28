@@ -35,7 +35,13 @@ function prunaReason(value: unknown) {
   return text.replace(/\s+/g, " ").trim().slice(0, 220);
 }
 
-async function enhance(input: Buffer, contentType: string, apiKey: string, target = 4): Promise<Result> {
+// "B&W AI": an editorial black-and-white look made by Pruna's prompt-based editor (p-image-edit, $0.01/foto).
+const BW_PROMPT = "Turn image 1 into a high-contrast black-and-white editorial news photograph, like a magazine cover cut-out: "
+  + "the people become crisp monochrome with deep blacks, bright clean highlights and sharp detail, with a fine film grain over the whole picture. "
+  + "Replace the background with a dark muted navy-blue tinted backdrop with subtle vertical stripes and grain texture. "
+  + "Keep every person exactly the same: same faces, identity, expressions, pose, clothing, framing and composition. Do not add text, logos or new objects.";
+
+async function enhance(input: Buffer, contentType: string, apiKey: string, target = 4, style: "bw" | null = null): Promise<Result> {
   const started = Date.now();
   const signal = AbortSignal.timeout(170_000);
   const source = await sharp(input, { limitInputPixels: 40_000_000 }).metadata();
@@ -66,10 +72,12 @@ async function enhance(input: Buffer, contentType: string, apiKey: string, targe
 
   // Submit exactly once. Only status GETs follow; never retry a paid POST.
   const response = await fetch(`${API}/v1/predictions`, {
-    method: "POST", headers: { ...headers, "Content-Type": "application/json", Model: "p-image-upscale", "Try-Sync": "true" },
+    method: "POST", headers: { ...headers, "Content-Type": "application/json", Model: style ? "p-image-edit" : "p-image-upscale", "Try-Sync": "true" },
     // Editorial decision: news photos (protests, injuries) must not be blocked by Pruna's
     // "violence" safety checker, so it is turned off for KFL. Content responsibility stays with the newsroom.
-    body: JSON.stringify({ input: { image: imageUrl.toString(), target, enhance_details: true, enhance_realism: false, output_format: "jpg", output_quality: 92, disable_safety_checker: true } }),
+    body: JSON.stringify({ input: style
+      ? { prompt: BW_PROMPT, images: [imageUrl.toString()], aspect_ratio: "match_input_image", turbo: false, disable_safety_checker: true }
+      : { image: imageUrl.toString(), target, enhance_details: true, enhance_realism: false, output_format: "jpg", output_quality: 92, disable_safety_checker: true } }),
     signal, redirect: "error", cache: "no-store",
   });
   if (!response.ok) {
@@ -100,7 +108,17 @@ async function enhance(input: Buffer, contentType: string, apiKey: string, targe
   if (url.origin !== API || !url.pathname.startsWith("/v1/predictions/delivery/")) throw new Error("Adresa e rezultatit Pruna është e pavlefshme.");
   const download = await fetch(url, { headers, signal, redirect: "error", cache: "no-store" });
   if (!download.ok) throw new Error("Nuk u shkarkua rezultati Pruna. Fotografia origjinale është ruajtur.");
-  const output = await sharp(await boundedBody(download), { limitInputPixels: 8_000_000 }).rotate().jpeg({ quality: 92 }).toBuffer({ resolveWithObject: true });
+  const pipeline = sharp(await boundedBody(download), { limitInputPixels: 8_000_000 }).rotate();
+  if (style) {
+    // The editor rounds its output size, so trim the few pixels needed to match the original ratio exactly.
+    const meta = await pipeline.clone().metadata();
+    const ow = meta.width ?? 0, oh = meta.height ?? 0;
+    if (!ow || !oh) throw new Error("Rezultati Pruna është i pavlefshëm.");
+    if (Math.abs((ow / oh) / (width / height) - 1) > 0.06) throw new Error("Pruna ndryshoi raportin e fotos. Fotografia origjinale është ruajtur.");
+    const fitW = Math.min(ow, Math.round(oh * width / height));
+    pipeline.resize({ width: fitW, height: Math.min(oh, Math.round(fitW * height / width)), fit: "cover", position: "centre" });
+  }
+  const output = await pipeline.jpeg({ quality: 92 }).toBuffer({ resolveWithObject: true });
   if (Math.abs((output.info.width / output.info.height) / (width / height) - 1) > 0.02) throw new Error("Pruna ndryshoi raportin e fotos. Fotografia origjinale është ruajtur.");
   const cost = prediction.cost ?? prediction.usage?.cost ?? prediction.metadata?.cost;
   const finished = Date.now();
@@ -127,8 +145,10 @@ export async function POST(request: Request) {
     const input = await boundedBody(request);
     // ?target=2 for the small round / 4:5 photos: they never show above ~600 px, so a 2 MP
     // result is enough and comes back faster. The main photo keeps 4 MP.
-    const target = new URL(request.url).searchParams.get("target") === "2" ? 2 : 4;
-    const key = createHash("sha256").update(`v3-target-${target}`).update(request.headers.get("cookie") ?? "").update(input).digest("hex");
+    const params = new URL(request.url).searchParams;
+    const target = params.get("target") === "2" ? 2 : 4;
+    const style = params.get("style") === "bw" ? "bw" : null;
+    const key = createHash("sha256").update(style ? "v1-style-bw" : `v3-target-${target}`).update(request.headers.get("cookie") ?? "").update(input).digest("hex");
     for (const [key, job] of jobs) if (job.expires < Date.now()) jobs.delete(key);
     let job = jobs.get(key);
     if (!job) {
@@ -136,7 +156,7 @@ export async function POST(request: Request) {
       busy = true;
       // Share duplicate requests and retain the outcome (including errors) for
       // ten minutes, so a double-click/reconnect cannot submit another paid job.
-      const result = enhance(input, contentType, apiKey, target).finally(() => { busy = false; });
+      const result = enhance(input, contentType, apiKey, target, style).finally(() => { busy = false; });
       job = { expires: Date.now() + 600_000, result };
       jobs.set(key, job);
     }

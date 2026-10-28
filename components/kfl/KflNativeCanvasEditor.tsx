@@ -412,6 +412,9 @@ export default function KflNativeCanvasEditor({ article, brand = "momenti", draf
   const [mainSource, setMainSource] = useState(article.image);
   const [mainTransform, setMainTransform] = useState<MainTransform>({ x: null, y: null, zoom: 1 });
   const [prunaProcessing, setPrunaProcessing] = useState(false);
+  const [bwProcessing, setBwProcessing] = useState(false);
+  const [bwPair, setBwPair] = useState<{ original: string; styled: string } | null>(null);
+  const bwAbortController = useRef<AbortController | null>(null);
   // Enhance for a single round / 4:5 photo (its own Pruna request), with ON/OFF like the main photo.
   const [overlayEnhancing, setOverlayEnhancing] = useState<number | null>(null);
   const [overlayPruna, setOverlayPruna] = useState<Record<number, { original: string; enhanced: string }>>({});
@@ -1422,6 +1425,54 @@ export default function KflNativeCanvasEditor({ article, brand = "momenti", draf
     }
   }
 
+  // "B&W AI": Pruna's prompt-based editor turns the current photo into the editorial black-and-white look.
+  // One paid request ($0.01); afterwards the button only switches between the two saved versions.
+  async function bwPruna() {
+    if (bwPair && [bwPair.original, bwPair.styled].includes(mainSource)) {
+      setMainSource(mainSource === bwPair.styled ? bwPair.original : bwPair.styled);
+      setPreparedPhoto(null);
+      return;
+    }
+    if (bwAbortController.current || prunaAbortController.current || !mainImageLoaded) return;
+    const controller = new AbortController();
+    bwAbortController.current = controller;
+    setBwProcessing(true);
+    setNotice("");
+    try {
+      const source = await textureSourceBlob();
+      if (controller.signal.aborted) return;
+      if (source.size > 20 * 1024 * 1024) throw new Error("Pruna pranon fotografi deri në 20 MB.");
+      const response = await fetch("/kycu/api/enhance-pruna?style=bw", {
+        method: "POST", headers: { "Content-Type": source.type }, body: source,
+        credentials: "same-origin", signal: controller.signal,
+      });
+      if (!response.ok) {
+        const detail = await response.json().catch(() => null) as { error?: string } | null;
+        throw new Error(detail?.error || "B&W AI dështoi. Origjinalja është ruajtur.");
+      }
+      const url = URL.createObjectURL(await response.blob());
+      objectUrls.current.add(url);
+      if (controller.signal.aborted) return;
+      setBwPair({ original: mainSource, styled: url });
+      setMainSource(url);
+      setPreparedPhoto(null);
+      setNoticeKind("success");
+      const seconds = (Number(response.headers.get("X-Pruna-Processing-Ms")) / 1000).toFixed(1);
+      const cost = response.headers.get("X-Pruna-Reported-Cost");
+      setNotice(`B&W AI: ${response.headers.get("X-Pruna-Output-Resolution")} · ${seconds}s${cost ? ` · kosto e raportuar: ${cost}` : ""} · për më shumë qartësi shtyp pastaj Enhance`);
+    } catch (error) {
+      if (!controller.signal.aborted) {
+        setNoticeKind("error");
+        setNotice(error instanceof Error ? error.message : "B&W AI dështoi. Origjinalja është ruajtur.");
+      }
+    } finally {
+      if (bwAbortController.current === controller) {
+        bwAbortController.current = null;
+        setBwProcessing(false);
+      }
+    }
+  }
+
   function prunaButtons(mobile = false) {
     const hasResult = Boolean(prunaComparison && [prunaComparison.original, prunaComparison.enhanced].includes(mainSource));
     const showingEnhanced = hasResult && mainSource === prunaComparison?.enhanced;
@@ -2287,8 +2338,12 @@ export default function KflNativeCanvasEditor({ article, brand = "momenti", draf
                 <button className={`kfl-enhance-toggle${selectedFilterId !== "original" ? " is-active" : ""}${filtersOpen ? " is-open" : ""}`} type="button" onClick={() => void toggleFilters()} aria-expanded={filtersOpen}><ToolIcon name="filters" />Filters</button>
                 <button className={`kfl-enhance-toggle${adjustActive ? " is-active" : ""}${adjustOpen ? " is-open" : ""}`} type="button" onClick={toggleAdjust} aria-expanded={adjustOpen}><ToolIcon name="adjust" />Rregullime</button>
                 <button className={`kfl-enhance-toggle${textureOpen ? " is-active is-open" : ""}`} type="button" onClick={toggleTexture} aria-expanded={textureOpen}><ToolIcon name="texture" />Texture</button>
-                {/* Shortcut: opens Texture with the "B&W Editorial" preset (local, no Pruna, no cost). */}
-                <button className={`kfl-enhance-toggle${textureOpen && texturePreset === "editorial-bw" ? " is-open" : ""}`} type="button" onClick={() => { if (!textureOpen) toggleTexture(); selectTexturePreset("editorial-bw"); }}><ToolIcon name="bw" />B&amp;W</button>
+                {/* B&W AI: Pruna prompt edit (p-image-edit, ~$0.01). After the first result it only toggles ON/OFF, no cost. */}
+                {(() => {
+                  const has = Boolean(bwPair && [bwPair.original, bwPair.styled].includes(mainSource));
+                  const on = has && mainSource === bwPair?.styled;
+                  return <button className={`kfl-enhance-toggle${on ? " is-active" : ""}`} type="button" onClick={() => void bwPruna()} disabled={!mainImageLoaded || bwProcessing || prunaProcessing} aria-busy={bwProcessing} aria-pressed={has ? on : undefined} title={has ? "Ndërro B&W AI / origjinalen (pa kosto)" : "B&W AI me Pruna (përdor kredi, ~$0.01)"}><ToolIcon name="bw" />{bwProcessing ? "B&W…" : has ? (on ? "B&W: ON" : "B&W: OFF") : "B&W AI"}</button>;
+                })()}
               </div>
               <div className="kfl-tool-footer">
                 {selectedFilterId !== "original"
