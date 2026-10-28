@@ -1227,7 +1227,7 @@ export default function KflNativeCanvasEditor({ article, brand = "momenti", draf
           const top = lineY - cap.actualBoundingBoxAscent;
           const baseline = lineY + cap.actualBoundingBoxDescent;
           const bottom = baseline + (lineY + context.measureText("gjpy").actualBoundingBoxDescent - baseline) * 0.4;
-          const padX = renderTitleSize * 0.14;
+          const padX = renderTitleSize * 0.08;
           const padY = renderTitleSize * 0.025;
           context.fillStyle = isBallina ? "#ffffff" : "rgba(155, 24, 23, 0.70)";
           context.fillRect(groupStart - padX, top - padY, groupWidth + padX * 2, bottom - top + padY * 2);
