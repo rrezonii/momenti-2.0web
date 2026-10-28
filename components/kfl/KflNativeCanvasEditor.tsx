@@ -286,8 +286,8 @@ function ToolIcon({ name }: { name: "pruna" | "filters" | "adjust" | "texture" |
   return (
     <svg className="kfl-tool-icon" viewBox="0 0 24 24" aria-hidden="true">
       {name === "bw" && <>
-        <circle cx="12" cy="12" r="8.5" />
-        <path d="M12 3.5a8.5 8.5 0 0 1 0 17Z" fill="currentColor" />
+        <path d="M12 3.5l1.9 5.1 5.1 1.9-5.1 1.9-1.9 5.1-1.9-5.1-5.1-1.9 5.1-1.9Z" />
+        <path d="M18.5 15.5l.7 1.8 1.8.7-1.8.7-.7 1.8-.7-1.8-1.8-.7 1.8-.7Z" />
       </>}
       {name === "pruna" && <>
         <path d="M4.5 19.5 14 10" />
@@ -1448,7 +1448,7 @@ export default function KflNativeCanvasEditor({ article, brand = "momenti", draf
       });
       if (!response.ok) {
         const detail = await response.json().catch(() => null) as { error?: string } | null;
-        throw new Error(detail?.error || "B&W AI dështoi. Origjinalja është ruajtur.");
+        throw new Error(detail?.error || "Stil AI dështoi. Origjinalja është ruajtur.");
       }
       const url = URL.createObjectURL(await response.blob());
       objectUrls.current.add(url);
@@ -1459,11 +1459,11 @@ export default function KflNativeCanvasEditor({ article, brand = "momenti", draf
       setNoticeKind("success");
       const seconds = (Number(response.headers.get("X-Pruna-Processing-Ms")) / 1000).toFixed(1);
       const cost = response.headers.get("X-Pruna-Reported-Cost");
-      setNotice(`B&W AI: ${response.headers.get("X-Pruna-Output-Resolution")} · ${seconds}s${cost ? ` · kosto e raportuar: ${cost}` : ""} · për më shumë qartësi shtyp pastaj Enhance`);
+      setNotice(`Stil AI: ${response.headers.get("X-Pruna-Output-Resolution")} · ${seconds}s${cost ? ` · kosto e raportuar: ${cost}` : ""} · për më shumë qartësi shtyp pastaj Enhance`);
     } catch (error) {
       if (!controller.signal.aborted) {
         setNoticeKind("error");
-        setNotice(error instanceof Error ? error.message : "B&W AI dështoi. Origjinalja është ruajtur.");
+        setNotice(error instanceof Error ? error.message : "Stil AI dështoi. Origjinalja është ruajtur.");
       }
     } finally {
       if (bwAbortController.current === controller) {
@@ -1476,14 +1476,14 @@ export default function KflNativeCanvasEditor({ article, brand = "momenti", draf
   function bwButton(mobile = false) {
     const has = Boolean(bwPair && [bwPair.original, bwPair.styled].includes(mainSource));
     const on = has && mainSource === bwPair?.styled;
-    const label = bwProcessing ? "B&W…" : has ? (on ? "B&W: ON" : "B&W: OFF") : "B&W AI";
+    const label = bwProcessing ? "Stil…" : has ? (on ? "Stil: ON" : "Stil: OFF") : "Stil AI";
     return (
       <button
         className={`${mobile ? "kfl-overlay-add-button kfl-filter-mobile" : "kfl-enhance-toggle"}${on ? " is-active" : ""}`}
         type="button" onClick={() => void bwPruna()}
         disabled={!mainImageLoaded || bwProcessing || prunaProcessing}
         aria-busy={bwProcessing} aria-pressed={has ? on : undefined} aria-label={label}
-        title={has ? "Ndërro B&W AI / origjinalen (pa kosto)" : "B&W AI me Pruna (përdor kredi, ~$0.01)"}
+        title={has ? "Ndërro Stil AI / origjinalen (pa kosto)" : "Stil AI gazetaresk me Pruna (përdor kredi, ~$0.01)"}
       >
         {mobile ? (bwProcessing ? "…" : <ToolIcon name="bw" />) : <><ToolIcon name="bw" />{label}</>}
       </button>
