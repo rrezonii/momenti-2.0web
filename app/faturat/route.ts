@@ -174,13 +174,19 @@ export async function POST(request: Request) {
     return json({ invoice: result, invoices: sorted(list), next: formatNumber(nextSeq(list, thisYear), thisYear) });
   }
   const amount = validAmount(body?.amount);
-  if (!date || !amount || !clientData) return json({ error: "Plotëso vlerën dhe datën." }, 400);
+  if (!date || !amount || !clientData) return json({ error: "Zgjidh klientin dhe plotëso vlerën dhe datën." }, 400);
+  const wanted = typeof body?.number === "string" && body.number.trim() ? body.number.match(/^\s*#?\s*(\d{1,4})\s*[/.\-]\s*(\d{4})\s*$/) : null;
+  if (typeof body?.number === "string" && body.number.trim() && !wanted) return json({ error: "Numri i faturës duhet të jetë si #08/2026." }, 400);
+  let taken = "";
   const { list, result } = await update((current) => {
-    const year = Number(date.slice(0, 4));
-    const seq = nextSeq(current, year);
+    // The number shown in the form (the next in order, or one typed by hand); it must not exist yet.
+    const year = wanted ? Number(wanted[2]) : Number(date.slice(0, 4));
+    const seq = wanted ? Number(wanted[1]) : nextSeq(current, year);
+    if (current.some((item) => item.number === formatNumber(seq, year))) { taken = formatNumber(seq, year); return { list: current, result: null as Invoice | null }; }
     const invoice: Invoice = { id: randomUUID(), client: clientData.id, clientData, year, seq, number: formatNumber(seq, year), date, amount, createdAt: now, updatedAt: now };
     return { list: [...current, invoice], result: invoice };
   });
+  if (!result) return json({ error: `Fatura ${taken} ekziston tashmë. Ndrysho numrin.` }, 409);
   const year = new Date().getFullYear();
   return json({ invoice: result, invoices: sorted(list), next: formatNumber(nextSeq(list, year), year) });
 }
@@ -286,7 +292,7 @@ h2{color:#fff4ef;font-size:17px;margin:26px 0 10px}
 .tab{font:inherit;font-weight:700;font-size:15px;border:0;border-radius:9px;padding:9px 18px;background:transparent;color:#ffd9dd;cursor:pointer}
 .tab.is-on{background:#fbfaf6;color:var(--red)}
 button.light{color:#ffd9dd;border-color:rgba(255,214,219,.4)}
-#newClient{width:auto;font-size:14px;padding:7px 10px;border-radius:10px}
+#edClient{font-size:18px;padding:10px 12px}
 .cdet{display:grid;grid-template-columns:auto 1fr;gap:4px 10px;margin:10px 0 12px;font-size:13.5px}
 .cdet dt{color:var(--muted);font-weight:600}.cdet dd{margin:0;font-weight:600;white-space:pre-line;word-break:break-word}
 .client .buttons{gap:6px}
@@ -413,8 +419,7 @@ Facebook</textarea></label>
     </section>
     <section id="tabFaturat">
     <div class="list-head"><h2>Të gjitha faturat</h2><div class="buttons">
-      <select id="newClient" aria-label="Klienti i faturës së re"></select>
-      <button class="btn small" type="button" id="newInvoice">+ Faturë e re</button>
+      <button class="btn small" type="button" id="newInvoice">+ Krijo faturë</button>
       <button class="btn small ghost light" type="button" id="upOpen">Ngarko fatura</button>
     </div></div>
     <div class="upload hidden" id="upForm">
@@ -432,9 +437,10 @@ Facebook</textarea></label>
       <div class="panel">
         <h3 id="edTitle">AIRTIKETA · Faturë e re</h3>
         <p id="edHint">Ndrysho vetëm vlerën. Numri i faturës jepet automatikisht.</p>
-        <label>Nr. Faturës<div class="fixed" id="edNumber">—</div><input id="edNumberInput" class="hidden" placeholder="#08/2026" autocomplete="off"></label>
-        <label>Vlera (€)<input id="edAmount" inputmode="decimal" placeholder="3.232" autocomplete="off"></label>
-        <label><span class="row2"><span>Data</span><button class="link" style="color:#6d1b27;text-transform:none;letter-spacing:0" type="button" id="edDateToggle">Ndrysho datën</button></span><input id="edDate" type="date" readonly></label>
+        <label>Klienti<select id="edClient"></select></label>
+        <label>Nr. Faturës<input id="edNumberInput" placeholder="#08/2026" autocomplete="off"></label>
+        <label>Çmimi (€)<input id="edAmount" inputmode="decimal" placeholder="3.232" autocomplete="off"></label>
+        <label>Data<input id="edDate" type="date"></label>
         <div class="buttons">
           <button class="btn" type="button" id="edSave">Ruaj faturën</button>
           <button class="btn ghost" type="button" id="edPdf">Ruaj PDF</button>
@@ -567,10 +573,9 @@ Facebook</textarea></label>
         + row("NR. unik", c.uid) + row("IBAN", c.iban) + row("Shërbimi", c.service) + '</dl>'
         + '<div class="buttons"><button class="btn small ghost" type="button" data-edit-client="' + esc(c.id) + '">Edito të dhënat</button><button class="btn small" type="button" data-client="' + esc(c.id) + '">Faturë e re <span class="nextno">' + esc(nextNo) + '</span></button></div></div>';
     }).join("");
-    var sel = $("newClient"), keep = sel.value;
-    sel.innerHTML = list.map(function(c){ return '<option value="' + esc(c.id) + '">' + esc(c.label) + '</option>'; }).join("");
-    if(keep && CLIENTS[keep]) sel.value = keep;
-    $("mfClient").innerHTML = sel.innerHTML;
+    var opts = list.map(function(c){ return '<option value="' + esc(c.id) + '">' + esc(c.label) + '</option>'; }).join("");
+    $("mfClient").innerHTML = opts;
+    var keep = $("edClient").value; $("edClient").innerHTML = '<option value="">— zgjidh klientin —</option>' + opts; $("edClient").value = keep && CLIENTS[keep] ? keep : "";
   }
   function load(){
     fetch("/faturat?list=1", { credentials: "same-origin", cache: "no-store" }).then(function(r){ if(!r.ok) throw 0; return r.json(); })
@@ -588,41 +593,40 @@ Facebook</textarea></label>
 
   // ---- views
   function show(view){ $("home").classList.toggle("hidden", view !== "home"); $("edit").classList.toggle("hidden", view !== "edit"); $("back").classList.toggle("hidden", view === "home"); window.scrollTo(0, 0); }
-  function draft(){ return { client: editClient, clientData: editing ? editing.clientData : CLIENTS[editClient], number: editing ? ($("edNumberInput").value.trim() || editing.number) : nextNo, date: $("edDate").value || today(), amount: cents($("edAmount").value) }; }
+  function draft(){ return { client: editClient, clientData: editing ? editing.clientData : CLIENTS[editClient], number: $("edNumberInput").value.trim() || (editing ? editing.number : nextNo), date: $("edDate").value || today(), amount: cents($("edAmount").value) }; }
   function refresh(){ mount($("edPaper"), draft()); }
-  function openEditor(inv, client){
-    editing = inv || null; editClient = inv ? inv.client : client;
-    var c = inv ? clientOf(inv) : CLIENTS[editClient];
-    $("edTitle").textContent = c.label + (inv ? " · Edito " + inv.number : " · Faturë e re");
-    $("edHint").textContent = inv ? "Mund të ndryshosh numrin, datën ose vlerën." : "Ndrysho vetëm vlerën. Numri i faturës jepet automatikisht.";
-    $("edNumber").textContent = nextNo + " (automatik)";
-    $("edNumber").classList.toggle("hidden", Boolean(inv)); $("edNumberInput").classList.toggle("hidden", !inv);
-    $("edNumberInput").value = inv ? inv.number : "";
-    $("edAmount").value = inv ? plain(inv.amount) : "";
-    $("edDate").value = inv ? inv.date : today(); $("edDate").readOnly = true; $("edDateToggle").textContent = "Ndrysho datën";
-    $("edStatus").textContent = "";
-    show("edit"); refresh(); $("edAmount").focus();
+  function editorTitle(){
+    var c = editing ? clientOf(editing) : CLIENTS[editClient];
+    $("edTitle").textContent = (c ? c.label : "Krijo faturë") + (editing ? " · " + editing.number : c ? " · Faturë e re" : "");
   }
+  function openEditor(inv, client){
+    editing = inv || null; editClient = inv ? inv.client : (client || "");
+    // A saved invoice keeps its client details; a new one takes them from the chosen client.
+    $("edClient").value = editClient; $("edClient").disabled = Boolean(inv);
+    $("edHint").textContent = inv ? "Ndrysho numrin, datën ose çmimin." : "Zgjidh klientin: të dhënat e tij vendosen vetë. Numri vjen sipas radhës dhe data e sotme, por mund t'i ndryshosh.";
+    $("edNumberInput").value = inv ? inv.number : nextNo;
+    $("edAmount").value = inv ? plain(inv.amount) : "";
+    $("edDate").value = inv ? inv.date : today();
+    $("edStatus").textContent = "";
+    editorTitle(); show("edit"); refresh();
+    (editClient ? $("edAmount") : $("edClient")).focus();
+  }
+  $("edClient").addEventListener("change", function(){ editClient = this.value; $("edStatus").textContent = ""; editorTitle(); refresh(); if(editClient) $("edAmount").focus(); });
   $("edAmount").addEventListener("input", refresh);
   $("edNumberInput").addEventListener("input", refresh);
   $("edDate").addEventListener("input", refresh);
-  $("edDateToggle").addEventListener("click", function(){
-    var input = $("edDate");
-    if(input.readOnly){ input.readOnly = false; input.focus(); this.textContent = "Data e sotme"; }
-    else { input.value = today(); input.readOnly = true; this.textContent = "Ndrysho datën"; refresh(); }
-  });
   $("edSave").addEventListener("click", function(){
     var d = draft(), btn = this;
-    if(!d.amount){ $("edStatus").textContent = "Shkruaj vlerën e faturës."; $("edAmount").focus(); return; }
+    if(!editing && !CLIENTS[d.client]){ $("edStatus").textContent = "Zgjidh klientin."; $("edClient").focus(); return; }
+    if(!d.amount){ $("edStatus").textContent = "Shkruaj çmimin e faturës."; $("edAmount").focus(); return; }
     btn.disabled = true; $("edStatus").textContent = "Duke ruajtur…";
     fetch("/faturat", { method: "POST", credentials: "same-origin", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(editing ? { id: editing.id, number: d.number, date: d.date, amount: d.amount } : { client: d.client, date: d.date, amount: d.amount }) })
+      body: JSON.stringify(editing ? { id: editing.id, number: d.number, date: d.date, amount: d.amount } : { client: d.client, number: d.number, date: d.date, amount: d.amount }) })
       .then(function(r){ return r.json().then(function(b){ if(!r.ok) throw new Error(b.error || ""); return b; }); })
       .then(function(res){
         setData(res); editing = res.invoice;
-        $("edTitle").textContent = clientOf(res.invoice).label + " · " + res.invoice.number;
-        $("edNumber").classList.add("hidden"); $("edNumberInput").classList.remove("hidden"); $("edNumberInput").value = res.invoice.number;
-        $("edHint").textContent = "Mund të ndryshosh numrin, datën ose vlerën."; refresh();
+        $("edNumberInput").value = res.invoice.number; $("edClient").disabled = true; editorTitle();
+        $("edHint").textContent = "Ndrysho numrin, datën ose çmimin."; refresh();
         $("edStatus").textContent = "Fatura " + res.invoice.number + " u ruajt ✓";
       })
       .catch(function(e){ $("edStatus").textContent = e.message || "Ruajtja dështoi. Provo përsëri."; })
@@ -655,7 +659,7 @@ Facebook</textarea></label>
     $("tabFaturat").classList.toggle("hidden", t.getAttribute("data-tab") !== "faturat");
     $("tabKlientet").classList.toggle("hidden", t.getAttribute("data-tab") !== "klientet");
   }); });
-  $("newInvoice").addEventListener("click", function(){ if($("newClient").value) openEditor(null, $("newClient").value); });
+  $("newInvoice").addEventListener("click", function(){ openEditor(null, ""); });
   $("clCancel").addEventListener("click", function(){ $("clForm").classList.add("hidden"); });
   $("clForm").addEventListener("submit", function(e){
     e.preventDefault();
