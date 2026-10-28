@@ -1,0 +1,444 @@
+import { randomUUID, timingSafeEqual } from "node:crypto";
+import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
+import path from "node:path";
+import { LOGO, STAMP } from "@/lib/invoices/assets";
+
+// Momenti Media invoices (momenti.info/faturat), behind HTTP Basic auth.
+// Invoices are stored in data/invoices/invoices.json (data/ survives deploys). The invoice
+// number is always assigned here on the server, in order, per year: #07/2026, #08/2026, …
+export const dynamic = "force-dynamic";
+export const runtime = "nodejs";
+
+const USER = process.env.INVOICES_USER?.trim() || process.env.CALCULATOR_USER?.trim() || "redaksia";
+const PASS = process.env.INVOICES_PASSWORD?.trim() || process.env.CALCULATOR_PASSWORD?.trim() || "genti";
+// Last invoice number made before this page existed (#06/2026), so the first one here is #07/2026.
+const START: Record<number, number> = { 2026: 6 };
+const CLIENTS = ["airtiketa"];
+
+const DATA_DIR = process.env.INVOICES_DATA_DIR || path.join(process.cwd(), "data", "invoices");
+const FILE = path.join(DATA_DIR, "invoices.json");
+type Invoice = { id: string; client: string; year: number; seq: number; number: string; date: string; amount: number; createdAt: string; updatedAt: string };
+let writing: Promise<unknown> = Promise.resolve();
+
+function same(a: string, b: string) {
+  const left = Buffer.from(a);
+  const right = Buffer.from(b);
+  return left.length === right.length && timingSafeEqual(left, right);
+}
+
+function authorized(request: Request) {
+  const header = request.headers.get("authorization") ?? "";
+  if (!header.startsWith("Basic ")) return false;
+  const decoded = Buffer.from(header.slice(6), "base64").toString("utf8");
+  const split = decoded.indexOf(":");
+  return split >= 0 && same(decoded.slice(0, split), USER) && same(decoded.slice(split + 1), PASS);
+}
+
+function sameOrigin(request: Request) {
+  const origin = request.headers.get("origin");
+  if (!origin) return true;
+  try { return new URL(origin).host === (request.headers.get("host") ?? new URL(request.url).host); } catch { return false; }
+}
+
+async function readInvoices(): Promise<Invoice[]> {
+  try {
+    const list = JSON.parse(await readFile(FILE, "utf8"));
+    return Array.isArray(list) ? list : [];
+  } catch { return []; }
+}
+
+// One write at a time: two invoices saved at the same moment can never get the same number.
+function update<T>(change: (list: Invoice[]) => { list: Invoice[]; result: T }) {
+  const next = writing.then(async () => {
+    const { list, result } = change(await readInvoices());
+    await mkdir(DATA_DIR, { recursive: true });
+    const temp = `${FILE}.${process.pid}.tmp`;
+    await writeFile(temp, JSON.stringify(list, null, 1));
+    await rename(temp, FILE);
+    return { list, result };
+  });
+  writing = next.catch(() => undefined);
+  return next;
+}
+
+function nextSeq(list: Invoice[], year: number) {
+  return Math.max(START[year] ?? 0, ...list.filter((item) => item.year === year).map((item) => item.seq)) + 1;
+}
+
+const formatNumber = (seq: number, year: number) => `#${String(seq).padStart(2, "0")}/${year}`;
+const validDate = (value: unknown) => typeof value === "string" && /^\d{4}-\d{2}-\d{2}$/.test(value) && !Number.isNaN(Date.parse(value)) ? value : null;
+const validAmount = (value: unknown) => typeof value === "number" && Number.isSafeInteger(value) && value > 0 && value < 1e11 ? value : null;
+const sorted = (list: Invoice[]) => [...list].sort((a, b) => b.year - a.year || b.seq - a.seq);
+
+const json = (body: unknown, status = 200) => Response.json(body, { status, headers: { "Cache-Control": "no-store", "X-Robots-Tag": "noindex, nofollow" } });
+const denied = () => new Response("Kërkohet hyrja.", { status: 401, headers: { "WWW-Authenticate": 'Basic realm="Momenti Faturat", charset="UTF-8"', "Cache-Control": "no-store" } });
+
+export async function GET(request: Request) {
+  if (!authorized(request)) return denied();
+  const params = new URL(request.url).searchParams;
+  if (params.has("list")) {
+    const list = await readInvoices();
+    const year = new Date().getFullYear();
+    return json({ invoices: sorted(list), next: formatNumber(nextSeq(list, year), year) });
+  }
+  return new Response(PAGE.replace("__LOGO__", LOGO).replace("__STAMP__", STAMP), {
+    headers: { "Content-Type": "text/html; charset=utf-8", "Cache-Control": "private, no-store", "X-Robots-Tag": "noindex, nofollow", "X-Content-Type-Options": "nosniff" },
+  });
+}
+
+export async function POST(request: Request) {
+  if (!authorized(request)) return denied();
+  if (!sameOrigin(request)) return json({ error: "Kërkesë e pavlefshme." }, 403);
+  const body = await request.json().catch(() => null) as Record<string, unknown> | null;
+  const date = validDate(body?.date);
+  const amount = validAmount(body?.amount);
+  const id = typeof body?.id === "string" ? body.id : "";
+  const client = typeof body?.client === "string" && CLIENTS.includes(body.client) ? body.client : null;
+  if (!date || !amount || (!id && !client)) return json({ error: "Plotëso vlerën dhe datën." }, 400);
+  const now = new Date().toISOString();
+  const { list, result } = await update((current) => {
+    if (id) {
+      // Editing keeps the invoice number; only the value and date change.
+      const existing = current.find((item) => item.id === id);
+      if (!existing) return { list: current, result: null as Invoice | null };
+      const changed = { ...existing, date, amount, updatedAt: now };
+      return { list: current.map((item) => item.id === id ? changed : item), result: changed };
+    }
+    const year = Number(date.slice(0, 4));
+    const seq = nextSeq(current, year);
+    const invoice: Invoice = { id: randomUUID(), client: client!, year, seq, number: formatNumber(seq, year), date, amount, createdAt: now, updatedAt: now };
+    return { list: [...current, invoice], result: invoice };
+  });
+  if (!result) return json({ error: "Fatura nuk u gjet." }, 404);
+  const year = new Date().getFullYear();
+  return json({ invoice: result, invoices: sorted(list), next: formatNumber(nextSeq(list, year), year) });
+}
+
+export async function DELETE(request: Request) {
+  if (!authorized(request)) return denied();
+  if (!sameOrigin(request)) return json({ error: "Kërkesë e pavlefshme." }, 403);
+  const id = new URL(request.url).searchParams.get("id") ?? "";
+  const { list } = await update((current) => ({ list: current.filter((item) => item.id !== id), result: null }));
+  const year = new Date().getFullYear();
+  return json({ invoices: sorted(list), next: formatNumber(nextSeq(list, year), year) });
+}
+
+const PAGE = String.raw`<!doctype html>
+<html lang="sq">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex, nofollow">
+<title>Faturat · Momenti Media</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Outfit:wght@400;500;600;700;800;900&display=swap" rel="stylesheet">
+<style>
+:root{--red:#9b0019;--navy:#0f1c3f;--beige:#f5f0e6;--muted:#6b6f80;--line:#e3dccf}
+*{box-sizing:border-box}
+body{margin:0;min-height:100vh;font-family:Outfit,Segoe UI,Arial,sans-serif;color:var(--navy);background:radial-gradient(90% 60% at 100% 0%,rgba(161,40,58,.35),transparent 65%),linear-gradient(180deg,#34101a,#2c0b11);padding:24px 16px 48px}
+.wrap{max-width:1100px;margin:0 auto}
+.top{display:flex;align-items:center;justify-content:space-between;gap:12px;color:#fff4ef;margin-bottom:18px}
+.top h1{margin:0;font-size:24px;font-weight:800}
+.top a,.link{color:#ffb4bb;font-weight:600;font-size:14px;text-decoration:none;cursor:pointer;background:none;border:0;font-family:inherit;padding:0}
+h2{color:#fff4ef;font-size:17px;margin:26px 0 10px}
+.clients{display:grid;grid-template-columns:repeat(auto-fill,minmax(240px,1fr));gap:12px}
+.client{background:#fbfaf6;border-radius:16px;padding:18px;cursor:pointer;border:2px solid transparent;text-align:left;font-family:inherit;color:inherit}
+.client:hover{border-color:#c9a2a7}
+.client b{display:block;font-size:20px;font-weight:800;color:var(--red);letter-spacing:.02em}
+.client small{color:var(--muted);font-size:13px}
+.inv{display:grid;grid-template-columns:110px 1fr 120px 130px auto;gap:12px;align-items:center;background:#fbfaf6;border-radius:12px;padding:12px 14px;margin-bottom:8px;cursor:pointer;border:2px solid transparent;font-variant-numeric:tabular-nums}
+.inv:hover{border-color:#c9a2a7}
+.inv .no{font-weight:800;color:var(--red);font-size:16px}
+.inv .amt{font-weight:800;text-align:right}
+.inv .acts{display:flex;gap:6px;justify-content:flex-end}
+.empty{color:#d9c3c0;font-size:14px}
+button.btn{font:inherit;font-weight:700;border:0;border-radius:10px;padding:10px 16px;cursor:pointer;background:#6d1b27;color:#fff}
+button.ghost{background:transparent;color:var(--muted);border:1.5px solid var(--line)}
+button.small{padding:6px 10px;font-size:13px}
+button:disabled{opacity:.55;cursor:default}
+.editor{display:grid;grid-template-columns:320px 1fr;gap:18px;align-items:start}
+.panel{background:#fbfaf6;border-radius:16px;padding:18px;position:sticky;top:16px}
+.panel h3{margin:0 0 4px;font-size:20px;color:var(--red)}
+.panel p{margin:0 0 14px;color:var(--muted);font-size:13px}
+label{display:flex;flex-direction:column;gap:6px;font-size:12px;font-weight:700;color:var(--muted);letter-spacing:.04em;text-transform:uppercase;margin-bottom:14px}
+input{font:inherit;font-size:20px;font-weight:700;color:var(--navy);padding:11px 13px;border:1.5px solid var(--line);border-radius:12px;background:#fff;outline:none;width:100%}
+input:focus{border-color:var(--navy)}
+input[readonly]{background:#f2efe8;color:var(--muted)}
+.fixed{font-size:20px;font-weight:800;color:var(--navy);padding:4px 0}
+.row2{display:flex;justify-content:space-between;align-items:center;gap:8px}
+.status{font-size:13px;color:var(--muted);min-height:18px;margin:10px 0 0}
+.buttons{display:flex;flex-wrap:wrap;gap:8px}
+.preview{background:rgba(255,255,255,.04);border-radius:16px;padding:12px}
+.paper-box{width:100%;position:relative;overflow:hidden;border-radius:6px;box-shadow:0 18px 40px rgba(18,3,6,.35)}
+.modal{position:fixed;inset:0;z-index:20;display:none;align-items:flex-start;justify-content:center;overflow:auto;padding:24px 16px;background:rgba(20,4,8,.78)}
+.modal.is-open{display:flex}
+.modal-in{width:100%;max-width:820px}
+.modal-head{display:flex;justify-content:space-between;align-items:center;gap:8px;margin-bottom:10px;color:#fff4ef;flex-wrap:wrap}
+body.modal-open{overflow:hidden}
+.hidden{display:none!important}
+
+/* The invoice itself: a fixed 1414 × 2000 px A4 page (same layout as the Canva template), scaled to fit. */
+.paper{position:absolute;left:0;top:0;width:1414px;height:2000px;background:#fff;transform-origin:0 0;color:var(--navy);font-family:Outfit,Arial,sans-serif;overflow:hidden}
+.paper *{position:absolute;margin:0;white-space:nowrap}
+.p-band{left:0;top:0;width:1414px;height:368px;background:var(--red)}
+.p-company{left:0;width:1414px;top:72px;text-align:center;color:#fff;font-size:82px;font-weight:700;letter-spacing:.005em;padding-left:80px}
+.p-logo{left:518px;top:196px;width:372px;height:146px}
+.p-title{left:112px;top:405px;width:518px;height:140px}
+.p-k{left:725px;font-size:27px;font-weight:700}
+.p-v{left:980px;font-size:27px;font-weight:700}
+.p-ul{height:2px;background:var(--navy)}
+.p-to{left:115px;top:596px;font-size:30px;font-weight:700;line-height:44.5px;white-space:pre}
+.p-by{left:725px;top:596px;font-size:30px;font-weight:700}
+.p-by2{left:732px;top:658px;font-size:27px;font-weight:400}
+.p-addr{left:732px;top:704px;font-size:31px;font-weight:400;line-height:40px;white-space:pre;letter-spacing:.01em}
+.p-bar{left:108px;top:922px;width:1140px;height:106px;background:var(--red)}
+.p-bar span{top:34px;color:#fff;font-size:30px;font-weight:700}
+.p-head{left:108px;top:1090px;width:1140px;height:106px;background:var(--beige)}
+.p-head span{top:34px;color:var(--red);font-size:31px;font-weight:700}
+.p-svc{left:132px;top:1220px;font-size:27px;font-weight:700;line-height:34px;white-space:pre}
+.p-price{right:234px;top:1220px;font-size:27px;font-weight:400}
+.p-line{left:107px;top:1411px;width:1137px;height:2px;background:var(--navy)}
+.p-bank{left:115px;top:1458px;font-size:31px;font-weight:700}
+.p-bank2{left:115px;top:1508px;font-size:27px;line-height:38px;white-space:pre}
+.p-thanks{left:115px;top:1625px;font-size:27px;line-height:34px;white-space:pre}
+.p-note{left:115px;top:1710px;font-size:27px;font-weight:700;line-height:34px;color:#8a2430;white-space:pre}
+.p-totk{left:665px;top:1448px;font-size:25px;font-weight:700}
+.p-total{right:220px;top:1446px;font-size:64px;font-weight:800}
+.p-totline{left:667px;top:1536px;width:577px;height:2px;background:var(--navy)}
+.p-stamp{left:762px;top:1500px;width:304px;height:304px;transform:rotate(-24deg)}
+.p-sign{left:670px;top:1636px;font-size:27px;font-weight:700}
+.p-sline{height:2px;background:var(--navy);top:1682px}
+.p-slabel{top:1690px;font-size:27px}
+.p-foot{left:0;top:1775px;width:1414px;height:225px;background:var(--beige)}
+.p-mail{left:175px;top:1872px;width:36px;height:36px}
+.p-mailt{left:222px;top:1872px;font-size:28px}
+.p-fb{left:748px;top:1862px;width:28px;height:56px}
+.p-fbt{left:786px;top:1872px;font-size:28px}
+.p-fbt u{position:static;text-decoration:underline}
+
+.pdf-stage{position:fixed;left:-20000px;top:0;width:1414px;height:2000px}
+.pdf-stage .paper{transform:none}
+@media (max-width:860px){.editor{grid-template-columns:1fr}.panel{position:static}.inv{grid-template-columns:90px 1fr 110px;}.inv .date{display:none}.inv .acts{grid-column:1/-1}}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="top"><h1>Faturat · Momenti Media</h1><button class="link hidden" id="back" type="button">← Të gjitha faturat</button></div>
+
+  <div id="home">
+    <h2>Klientët</h2>
+    <div class="clients">
+      <button class="client" type="button" data-client="airtiketa"><b>AIRTIKETA</b><small>Airtiketa GmbH · Faturë e re <span class="nextno"></span></small></button>
+    </div>
+    <h2>Të gjitha faturat</h2>
+    <div id="list"><div class="empty">Duke i ngarkuar…</div></div>
+  </div>
+
+  <div id="edit" class="hidden">
+    <div class="editor">
+      <div class="panel">
+        <h3 id="edTitle">AIRTIKETA · Faturë e re</h3>
+        <p id="edHint">Ndrysho vetëm vlerën. Numri i faturës jepet automatikisht.</p>
+        <label>Nr. Faturës<div class="fixed" id="edNumber">—</div></label>
+        <label>Vlera (€)<input id="edAmount" inputmode="decimal" placeholder="3.232" autocomplete="off"></label>
+        <label><span class="row2"><span>Data</span><button class="link" style="color:#6d1b27;text-transform:none;letter-spacing:0" type="button" id="edDateToggle">Ndrysho datën</button></span><input id="edDate" type="date" readonly></label>
+        <div class="buttons">
+          <button class="btn" type="button" id="edSave">Ruaj faturën</button>
+          <button class="btn ghost" type="button" id="edPdf">Ruaj PDF</button>
+        </div>
+        <div class="status" id="edStatus"></div>
+      </div>
+      <div class="preview"><div class="paper-box" id="edPaper"></div></div>
+    </div>
+  </div>
+</div>
+
+<div class="modal" id="modal" role="dialog" aria-modal="true">
+  <div class="modal-in">
+    <div class="modal-head"><b id="mTitle"></b><div class="buttons">
+      <button class="btn ghost small" style="color:#fff4ef" type="button" id="mClose">Mbyll</button>
+      <button class="btn ghost small" style="color:#fff4ef" type="button" id="mEdit">Edito</button>
+      <button class="btn small" type="button" id="mPdf">Ruaj PDF</button>
+    </div></div>
+    <div class="paper-box" id="mPaper"></div>
+  </div>
+</div>
+
+<script>
+(function(){
+  var $ = function(id){ return document.getElementById(id); };
+  var LOGO = "__LOGO__", STAMP = "__STAMP__";
+  var CLIENTS = {
+    airtiketa: { name: "Airtiketa GmbH", label: "AIRTIKETA", lines: "Airtiketa GmbH\nNr. Biznesit: HRB 728839\nColmarer Str. 1\n79576 Weil am Rhein, Gjermani",
+      service: "Te ardhura nga rrjetet sociale:\nFacebook", uid: "N/A" }
+  };
+  var invoices = [], nextNo = "", editing = null, editClient = "airtiketa";
+  function esc(t){ return String(t).replace(/[&<>"]/g, function(c){ return {"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]; }); }
+  function cents(text){
+    var s = String(text||"").replace(/[^0-9.,]/g,""); if(!s) return 0;
+    var lastDot = s.lastIndexOf("."), lastComma = s.lastIndexOf(","), dec = Math.max(lastDot, lastComma);
+    var decimals = dec >= 0 ? s.length - dec - 1 : 0, multipleDots = (s.match(/\./g)||[]).length > 1;
+    if (dec < 0 || (lastComma < 0 && (multipleDots || decimals === 3))) return Math.round(Number(s.replace(/[.,]/g,""))*100) || 0;
+    return (Number(s.slice(0, dec).replace(/[.,]/g,"")||0)*100 + Number((s.slice(dec+1)+"00").slice(0,2))) || 0;
+  }
+  function money(c){
+    var e = Math.floor(c/100).toString().replace(/\B(?=(\d{3})+(?!\d))/g,".");
+    return "€ " + e + (c % 100 ? "," + String(c%100).padStart(2,"0") : "");
+  }
+  function plain(c){ var e = Math.floor(c/100).toString().replace(/\B(?=(\d{3})+(?!\d))/g,"."); return e + (c % 100 ? "," + String(c%100).padStart(2,"0") : ""); }
+  function dmy(iso){ var p = String(iso||"").split("-"); return p.length === 3 ? p[2] + "/" + p[1] + "/" + p[0] : ""; }
+  function today(){ var d = new Date(); return d.getFullYear() + "-" + String(d.getMonth()+1).padStart(2,"0") + "-" + String(d.getDate()).padStart(2,"0"); }
+
+  function paperHtml(inv){
+    var c = CLIENTS[inv.client] || CLIENTS.airtiketa, amt = inv.amount ? money(inv.amount) : "€ —";
+    return '<div class="paper">'
+      + '<div class="p-band"></div><div class="p-company">Momenti Media SH.P.K</div><img class="p-logo" src="' + LOGO + '" alt="">'
+      + '<svg class="p-title" viewBox="0 0 518 140"><text x="0" y="132" textLength="518" lengthAdjust="spacingAndGlyphs" font-family="Outfit, Arial, sans-serif" font-weight="800" font-size="158" fill="#9b0019">FATURË</text></svg>'
+      + '<div class="p-k" style="top:382px">Nr. Biznesit</div><div class="p-v" style="top:382px">812409820</div>'
+      + '<div class="p-ul" style="left:725px;top:432px;width:116px"></div><div class="p-ul" style="left:980px;top:432px;width:350px"></div>'
+      + '<div class="p-k" style="top:447px">Nr. Faturës</div><div class="p-v" style="top:447px">' + esc(inv.number || "—") + '</div>'
+      + '<div class="p-ul" style="left:725px;top:486px;width:116px"></div><div class="p-ul" style="left:980px;top:486px;width:350px"></div>'
+      + '<div class="p-k" style="top:518px">Data</div><div class="p-v" style="top:518px">' + esc(dmy(inv.date)) + '</div>'
+      + '<div class="p-ul" style="left:725px;top:555px;width:116px"></div><div class="p-ul" style="left:980px;top:555px;width:350px"></div>'
+      + '<div class="p-to">Faturë për:\n' + esc(c.lines) + '</div>'
+      + '<div class="p-by">Faturoi</div><div class="p-ul" style="left:725px;top:645px;width:116px"></div>'
+      + '<div class="p-by2">Emri:<span style="left:128px;top:0">Momenti Media SH.P.K</span></div>'
+      + '<div class="p-addr">Adresa: GURSEL DHE BAJRAM\nSYLEJMANI, 274</div>'
+      + '<div class="p-bar"><span style="left:24px">Faturë për: ' + esc(c.name) + '</span><span style="left:544px">NR. unik identifikues:</span><span style="left:930px">' + esc(c.uid) + '</span></div>'
+      + '<div class="p-head"><span style="left:30px">SHËRBIMI</span><span style="right:66px">CMIMI</span></div>'
+      + '<div class="p-svc">' + esc(c.service) + '</div><div class="p-price">' + esc(amt) + '</div>'
+      + '<div class="p-line"></div>'
+      + '<div class="p-bank">Të dhënat bankare</div>'
+      + '<div class="p-bank2"><b style="position:static">Account holder</b>: Momenti Media SH.P.K\n<b style="position:static">IBAN</b>: GB28MOOW00993554710280</div>'
+      + '<div class="p-thanks">Faleminderit që zgjodhët të\nbashkëpunoni me ne!</div>'
+      + '<div class="p-note">Vini re: Afati kohor i pageses\nështë 15 ditë</div>'
+      + '<div class="p-totk">TOTALI</div><div class="p-total">' + esc(amt) + '</div><div class="p-totline"></div>'
+      + '<div class="p-sign">Rrezon Elmazi</div>'
+      + '<div class="p-sline" style="left:667px;width:183px"></div><div class="p-slabel" style="left:710px">Faturoi</div>'
+      + '<div class="p-sline" style="left:1052px;width:194px;top:1680px"></div><div class="p-slabel" style="left:1100px">Pranoi</div>'
+      + '<img class="p-stamp" src="' + STAMP + '" alt="">'
+      + '<div class="p-foot"></div>'
+      + '<svg class="p-mail" viewBox="0 0 24 24"><circle cx="12" cy="12" r="12" fill="#0f1c3f"/><rect x="5.5" y="7.5" width="13" height="9" rx="1.2" fill="#fff"/><path d="M5.8 8l6.2 4.6L18.2 8" fill="none" stroke="#0f1c3f" stroke-width="1.4"/></svg>'
+      + '<div class="p-mailt">momentimedia.ou@gmail.com</div>'
+      + '<svg class="p-fb" viewBox="0 0 14 28"><path d="M9.2 28V15.3h3.9l.6-4.8H9.2V7.5c0-1.4.4-2.3 2.3-2.3H14V.9C13.6.8 12.1.7 10.4.7 6.8.7 4.3 2.9 4.3 6.9v3.6H.4v4.8h3.9V28z" fill="#0f1c3f"/></svg>'
+      + '<div class="p-fbt"><u>fb.com/</u>gazetamomenti</div>'
+      + '</div>';
+  }
+  // Scale the fixed 1414 px page to whatever width the box has.
+  function mount(box, inv){
+    box.innerHTML = paperHtml(inv);
+    var fit = function(){ var s = box.clientWidth / 1414; box.style.height = (2000 * s) + "px"; box.firstChild.style.transform = "scale(" + s + ")"; };
+    fit(); requestAnimationFrame(fit);
+  }
+  window.addEventListener("resize", function(){ document.querySelectorAll(".paper-box").forEach(function(box){ if(box.firstChild){ var s = box.clientWidth / 1414; box.style.height = (2000*s) + "px"; box.firstChild.style.transform = "scale(" + s + ")"; } }); });
+
+  // ---- PDF (same libraries as the calculator)
+  function loadScript(src){ return new Promise(function(ok, fail){ var s = document.createElement("script"); s.src = src; s.onload = ok; s.onerror = fail; document.head.appendChild(s); }); }
+  var libs = null;
+  function pdfLibs(){ return libs || (libs = Promise.all([
+    loadScript("https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"),
+    loadScript("https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js")]).catch(function(e){ libs = null; throw e; })); }
+  function savePdf(inv, button, statusEl){
+    var label = button.textContent; button.disabled = true; button.textContent = "Duke krijuar…";
+    var stage = document.createElement("div"); stage.className = "pdf-stage"; stage.innerHTML = paperHtml(inv); document.body.appendChild(stage);
+    pdfLibs().then(function(){ return document.fonts ? document.fonts.ready : null; })
+      .then(function(){ return window.html2canvas(stage.firstChild, { scale: 1.5, backgroundColor: "#ffffff", width: 1414, height: 2000, windowWidth: 1414 }); })
+      .then(function(canvas){
+        var pdf = new window.jspdf.jsPDF({ unit: "mm", format: "a4", orientation: "portrait" });
+        pdf.addImage(canvas.toDataURL("image/jpeg", 0.95), "JPEG", 0, 0, 210, 297);
+        pdf.save("Fatura-" + String(inv.number || "e-re").replace(/[^0-9A-Za-z]+/g, "-").replace(/^-|-$/g, "") + "-" + (CLIENTS[inv.client] || {}).label + ".pdf");
+        if(statusEl) statusEl.textContent = "PDF u ruajt ✓";
+      })
+      .catch(function(){ if(statusEl) statusEl.textContent = "PDF nuk u krijua. Kontrollo internetin dhe provo përsëri."; })
+      .then(function(){ stage.remove(); button.disabled = false; button.textContent = label; });
+  }
+
+  // ---- data
+  function setData(res){ invoices = res.invoices || []; nextNo = res.next || ""; showList(); }
+  function load(){
+    fetch("/faturat?list=1", { credentials: "same-origin", cache: "no-store" }).then(function(r){ if(!r.ok) throw 0; return r.json(); })
+      .then(setData).catch(function(){ $("list").innerHTML = '<div class="empty">Faturat nuk u ngarkuan. Rifresko faqen.</div>'; });
+  }
+  function showList(){
+    document.querySelectorAll(".nextno").forEach(function(el){ el.textContent = nextNo; });
+    if(!invoices.length){ $("list").innerHTML = '<div class="empty">Ende nuk ka fatura. Kliko AIRTIKETA për të krijuar të parën.</div>'; return; }
+    $("list").innerHTML = invoices.map(function(inv){
+      var c = CLIENTS[inv.client] || { label: inv.client };
+      return '<div class="inv" data-id="' + esc(inv.id) + '"><span class="no">' + esc(inv.number) + '</span><span>' + esc(c.label) + '</span><span class="date">' + esc(dmy(inv.date)) + '</span><span class="amt">' + esc(money(inv.amount)) + '</span>'
+        + '<span class="acts"><button class="btn ghost small" type="button" data-edit="' + esc(inv.id) + '">Edito</button><button class="btn ghost small" type="button" data-del="' + esc(inv.id) + '">Fshi</button></span></div>';
+    }).join("");
+  }
+
+  // ---- views
+  function show(view){ $("home").classList.toggle("hidden", view !== "home"); $("edit").classList.toggle("hidden", view !== "edit"); $("back").classList.toggle("hidden", view === "home"); window.scrollTo(0, 0); }
+  function draft(){ return { client: editClient, number: editing ? editing.number : nextNo, date: $("edDate").value || today(), amount: cents($("edAmount").value) }; }
+  function refresh(){ mount($("edPaper"), draft()); }
+  function openEditor(inv, client){
+    editing = inv || null; editClient = inv ? inv.client : client;
+    var c = CLIENTS[editClient];
+    $("edTitle").textContent = c.label + (inv ? " · Edito " + inv.number : " · Faturë e re");
+    $("edHint").textContent = inv ? "Numri i faturës mbetet " + inv.number + ". Ndrysho vlerën ose datën." : "Ndrysho vetëm vlerën. Numri i faturës jepet automatikisht.";
+    $("edNumber").textContent = inv ? inv.number : (nextNo + " (automatik)");
+    $("edAmount").value = inv ? plain(inv.amount) : "";
+    $("edDate").value = inv ? inv.date : today(); $("edDate").readOnly = true; $("edDateToggle").textContent = "Ndrysho datën";
+    $("edStatus").textContent = "";
+    show("edit"); refresh(); $("edAmount").focus();
+  }
+  $("edAmount").addEventListener("input", refresh);
+  $("edDate").addEventListener("input", refresh);
+  $("edDateToggle").addEventListener("click", function(){
+    var input = $("edDate");
+    if(input.readOnly){ input.readOnly = false; input.focus(); this.textContent = "Data e sotme"; }
+    else { input.value = today(); input.readOnly = true; this.textContent = "Ndrysho datën"; refresh(); }
+  });
+  $("edSave").addEventListener("click", function(){
+    var d = draft(), btn = this;
+    if(!d.amount){ $("edStatus").textContent = "Shkruaj vlerën e faturës."; $("edAmount").focus(); return; }
+    btn.disabled = true; $("edStatus").textContent = "Duke ruajtur…";
+    fetch("/faturat", { method: "POST", credentials: "same-origin", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(editing ? { id: editing.id, date: d.date, amount: d.amount } : { client: d.client, date: d.date, amount: d.amount }) })
+      .then(function(r){ return r.json().then(function(b){ if(!r.ok) throw new Error(b.error || ""); return b; }); })
+      .then(function(res){
+        setData(res); editing = res.invoice;
+        $("edTitle").textContent = CLIENTS[editClient].label + " · " + res.invoice.number;
+        $("edNumber").textContent = res.invoice.number; refresh();
+        $("edStatus").textContent = "Fatura " + res.invoice.number + " u ruajt ✓";
+      })
+      .catch(function(e){ $("edStatus").textContent = e.message || "Ruajtja dështoi. Provo përsëri."; })
+      .then(function(){ btn.disabled = false; });
+  });
+  $("edPdf").addEventListener("click", function(){
+    var d = draft();
+    if(!editing){ $("edStatus").textContent = "Ruaje faturën fillimisht, që të marrë numrin e saj."; return; }
+    savePdf(d, this, $("edStatus"));
+  });
+  $("back").addEventListener("click", function(){ show("home"); });
+  document.querySelectorAll("[data-client]").forEach(function(btn){ btn.addEventListener("click", function(){ openEditor(null, btn.getAttribute("data-client")); }); });
+
+  var opened = null;
+  function openModal(inv){ opened = inv; $("mTitle").textContent = inv.number + " · " + (CLIENTS[inv.client] || {}).label; $("modal").classList.add("is-open"); document.body.classList.add("modal-open"); mount($("mPaper"), inv); }
+  function closeModal(){ $("modal").classList.remove("is-open"); document.body.classList.remove("modal-open"); opened = null; }
+  $("mClose").addEventListener("click", closeModal);
+  $("modal").addEventListener("click", function(e){ if(e.target === $("modal")) closeModal(); });
+  document.addEventListener("keydown", function(e){ if(e.key === "Escape" && opened) closeModal(); });
+  $("mEdit").addEventListener("click", function(){ var inv = opened; closeModal(); openEditor(inv); });
+  $("mPdf").addEventListener("click", function(){ if(opened) savePdf(opened, this, null); });
+  $("list").addEventListener("click", function(e){
+    var id, inv;
+    var edit = e.target.closest("[data-edit]");
+    if(edit){ inv = invoices.find(function(x){ return x.id === edit.getAttribute("data-edit"); }); if(inv) openEditor(inv); return; }
+    var del = e.target.closest("[data-del]");
+    if(del){
+      id = del.getAttribute("data-del"); inv = invoices.find(function(x){ return x.id === id; });
+      if(!inv || !confirm("Ta fshij faturën " + inv.number + "?")) return;
+      fetch("/faturat?id=" + encodeURIComponent(id), { method: "DELETE", credentials: "same-origin" }).then(function(r){ if(!r.ok) throw 0; return r.json(); }).then(setData).catch(function(){ alert("Fshirja dështoi."); });
+      return;
+    }
+    var row = e.target.closest(".inv"); if(!row) return;
+    inv = invoices.find(function(x){ return x.id === row.getAttribute("data-id"); }); if(inv) openModal(inv);
+  });
+  load();
+})();
+</script>
+</body>
+</html>`;
