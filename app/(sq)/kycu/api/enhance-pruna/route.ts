@@ -101,8 +101,21 @@ async function enhance(input: Buffer, contentType: string, apiKey: string, targe
   const download = await fetch(url, { headers, signal, redirect: "error", cache: "no-store" });
   if (!download.ok) throw new Error("Nuk u shkarkua rezultati Pruna. Fotografia origjinale është ruajtur.");
   // 4 MP (and 2 MP) results keep the original 8 MP check; the 8 MP A/B test needs room for ~8.4 MP.
-  const output = await sharp(await boundedBody(download), { limitInputPixels: target === 8 ? 12_000_000 : 8_000_000 }).rotate().jpeg({ quality: 92 }).toBuffer({ resolveWithObject: true });
-  if (Math.abs((output.info.width / output.info.height) / (width / height) - 1) > 0.02) throw new Error("Pruna ndryshoi raportin e fotos. Fotografia origjinale është ruajtur.");
+  let output = await sharp(await boundedBody(download), { limitInputPixels: target === 8 ? 12_000_000 : 8_000_000 }).rotate().jpeg({ quality: 92 }).toBuffer({ resolveWithObject: true });
+  const ratioDrift = Math.abs((output.info.width / output.info.height) / (width / height) - 1);
+  // A/B 8MP + Realism: Pruna's realism mode returns slightly different proportions. Centre-crop it
+  // back to the original's proportions (no stretching) when the difference is small.
+  // 4 MP keeps the original strict 2% check below, unchanged.
+  if (target === 8 && ratioDrift > 0.02 && ratioDrift <= 0.15) {
+    const area = output.info.width * output.info.height;
+    const cropWidth = Math.min(output.info.width, Math.round(Math.sqrt(area * (width / height))));
+    const cropHeight = Math.min(output.info.height, Math.round(cropWidth / (width / height)));
+    output = await sharp(output.data).resize(cropWidth, cropHeight, { fit: "cover", position: "centre" }).jpeg({ quality: 92 }).toBuffer({ resolveWithObject: true });
+  }
+  if (Math.abs((output.info.width / output.info.height) / (width / height) - 1) > 0.02) {
+    console.error(`Pruna ratio changed: input ${width}x${height}, output ${output.info.width}x${output.info.height} (target ${target})`);
+    throw new Error(`Pruna ndryshoi raportin e fotos (${width}×${height} → ${output.info.width}×${output.info.height}). Fotografia origjinale është ruajtur.`);
+  }
   const cost = prediction.cost ?? prediction.usage?.cost ?? prediction.metadata?.cost;
   const finished = Date.now();
   // Where the time goes (pm2 logs), to tell a slow upload from a slow Pruna job.
@@ -132,7 +145,7 @@ export async function POST(request: Request) {
     // is 1-128 MP; 5-8 MP is billed $0.01). Default stays 4 with the original settings.
     const requested = new URL(request.url).searchParams.get("target");
     const target = requested === "2" ? 2 : requested === "8" ? 8 : 4;
-    const key = createHash("sha256").update(target === 8 ? "v3-target-8-realism" : `v3-target-${target}`).update(request.headers.get("cookie") ?? "").update(input).digest("hex");
+    const key = createHash("sha256").update(target === 8 ? "v4-target-8-realism" : `v3-target-${target}`).update(request.headers.get("cookie") ?? "").update(input).digest("hex");
     for (const [key, job] of jobs) if (job.expires < Date.now()) jobs.delete(key);
     let job = jobs.get(key);
     if (!job) {
