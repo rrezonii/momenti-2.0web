@@ -1,5 +1,5 @@
 import { randomUUID, timingSafeEqual } from "node:crypto";
-import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
+import { mkdir, readFile, rename, unlink, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { LOGO, STAMP } from "@/lib/invoices/assets";
 
@@ -17,7 +17,11 @@ const CLIENTS = ["airtiketa"];
 
 const DATA_DIR = process.env.INVOICES_DATA_DIR || path.join(process.cwd(), "data", "invoices");
 const FILE = path.join(DATA_DIR, "invoices.json");
-type Invoice = { id: string; client: string; year: number; seq: number; number: string; date: string; amount: number; createdAt: string; updatedAt: string };
+// Uploaded = an older invoice made elsewhere (PDF/photo kept as a file); it still counts for the numbering.
+type Invoice = { id: string; client: string; year: number; seq: number; number: string; date: string; amount: number; createdAt: string; updatedAt: string; file?: string; fileType?: string; fileName?: string };
+const FILES_DIR = path.join(DATA_DIR, "files");
+const UPLOAD_TYPES: Record<string, string> = { "application/pdf": "pdf", "image/jpeg": "jpg", "image/png": "png", "image/webp": "webp" };
+const MAX_UPLOAD = 15 * 1024 * 1024;
 let writing: Promise<unknown> = Promise.resolve();
 
 function same(a: string, b: string) {
@@ -76,6 +80,18 @@ const denied = () => new Response("Kërkohet hyrja.", { status: 401, headers: { 
 export async function GET(request: Request) {
   if (!authorized(request)) return denied();
   const params = new URL(request.url).searchParams;
+  const fileId = params.get("file");
+  if (fileId) {
+    const invoice = (await readInvoices()).find((item) => item.id === fileId && item.file);
+    if (!invoice?.file) return json({ error: "Skedari nuk u gjet." }, 404);
+    const data = await readFile(path.join(FILES_DIR, path.basename(invoice.file))).catch(() => null);
+    if (!data) return json({ error: "Skedari nuk u gjet." }, 404);
+    const name = encodeURIComponent(invoice.fileName || invoice.file);
+    return new Response(new Uint8Array(data), { headers: {
+      "Content-Type": invoice.fileType || "application/pdf", "Cache-Control": "private, no-store", "X-Content-Type-Options": "nosniff",
+      "Content-Disposition": `${params.has("download") ? "attachment" : "inline"}; filename*=UTF-8''${name}`,
+    } });
+  }
   if (params.has("list")) {
     const list = await readInvoices();
     const year = new Date().getFullYear();
@@ -89,6 +105,7 @@ export async function GET(request: Request) {
 export async function POST(request: Request) {
   if (!authorized(request)) return denied();
   if (!sameOrigin(request)) return json({ error: "Kërkesë e pavlefshme." }, 403);
+  if (new URL(request.url).searchParams.has("upload")) return upload(request);
   const body = await request.json().catch(() => null) as Record<string, unknown> | null;
   const date = validDate(body?.date);
   const amount = validAmount(body?.amount);
@@ -100,7 +117,7 @@ export async function POST(request: Request) {
     if (id) {
       // Editing keeps the invoice number; only the value and date change.
       const existing = current.find((item) => item.id === id);
-      if (!existing) return { list: current, result: null as Invoice | null };
+      if (!existing || existing.file) return { list: current, result: null as Invoice | null };
       const changed = { ...existing, date, amount, updatedAt: now };
       return { list: current.map((item) => item.id === id ? changed : item), result: changed };
     }
@@ -114,11 +131,50 @@ export async function POST(request: Request) {
   return json({ invoice: result, invoices: sorted(list), next: formatNumber(nextSeq(list, year), year) });
 }
 
+async function upload(request: Request) {
+  const form = await request.formData().catch(() => null);
+  const file = form?.get("file");
+  const client = String(form?.get("client") ?? "");
+  const match = String(form?.get("number") ?? "").match(/^\s*#?\s*(\d{1,4})\s*[/.\-]\s*(\d{4})\s*$/);
+  const date = validDate(form?.get("date"));
+  const amountText = String(form?.get("amount") ?? "").trim();
+  const amount = amountText ? validAmount(Number(amountText)) : 0;
+  if (!(file instanceof File) || !file.size) return json({ error: "Zgjidh skedarin e faturës (PDF ose foto)." }, 400);
+  const ext = UPLOAD_TYPES[file.type];
+  if (!ext) return json({ error: "Lejohen vetëm PDF, JPG, PNG ose WebP." }, 415);
+  if (file.size > MAX_UPLOAD) return json({ error: "Skedari kalon kufirin 15 MB." }, 413);
+  if (!CLIENTS.includes(client)) return json({ error: "Zgjidh klientin." }, 400);
+  if (!match) return json({ error: "Shkruaj numrin e faturës, p.sh. #05/2026." }, 400);
+  if (!date) return json({ error: "Zgjidh datën e faturës." }, 400);
+  if (amount === null) return json({ error: "Vlera nuk është e saktë." }, 400);
+  const seq = Number(match[1]), year = Number(match[2]);
+  if (!seq || year < 2000 || year > 2100) return json({ error: "Numri i faturës nuk është i saktë." }, 400);
+  const id = randomUUID();
+  const stored = `${id}.${ext}`;
+  await mkdir(FILES_DIR, { recursive: true });
+  await writeFile(path.join(FILES_DIR, stored), new Uint8Array(await file.arrayBuffer()));
+  const now = new Date().toISOString();
+  const number = formatNumber(seq, year);
+  const { list, result } = await update((current) => {
+    if (current.some((item) => item.number === number)) return { list: current, result: null as Invoice | null };
+    const invoice: Invoice = { id, client, year, seq, number, date, amount: amount || 0, createdAt: now, updatedAt: now,
+      file: stored, fileType: file.type, fileName: file.name.replace(/[^\p{L}\p{N}._ -]/gu, "_").slice(0, 120) };
+    return { list: [...current, invoice], result: invoice };
+  });
+  if (!result) {
+    await unlink(path.join(FILES_DIR, stored)).catch(() => undefined);
+    return json({ error: `Fatura ${number} ekziston tashmë.` }, 409);
+  }
+  const thisYear = new Date().getFullYear();
+  return json({ invoice: result, invoices: sorted(list), next: formatNumber(nextSeq(list, thisYear), thisYear) });
+}
+
 export async function DELETE(request: Request) {
   if (!authorized(request)) return denied();
   if (!sameOrigin(request)) return json({ error: "Kërkesë e pavlefshme." }, 403);
   const id = new URL(request.url).searchParams.get("id") ?? "";
-  const { list } = await update((current) => ({ list: current.filter((item) => item.id !== id), result: null }));
+  const { list, result } = await update((current) => ({ list: current.filter((item) => item.id !== id), result: current.find((item) => item.id === id)?.file ?? null }));
+  if (result) await unlink(path.join(FILES_DIR, path.basename(result))).catch(() => undefined);
   const year = new Date().getFullYear();
   return json({ invoices: sorted(list), next: formatNumber(nextSeq(list, year), year) });
 }
@@ -152,6 +208,16 @@ h2{color:#fff4ef;font-size:17px;margin:26px 0 10px}
 .inv .amt{font-weight:800;text-align:right}
 .inv .acts{display:flex;gap:6px;justify-content:flex-end}
 .empty{color:#d9c3c0;font-size:14px}
+.list-head{display:flex;align-items:center;justify-content:space-between;gap:10px;margin:26px 0 10px}.list-head h2{margin:0}
+.upload{background:#fbfaf6;border-radius:16px;padding:18px;margin-bottom:12px}
+.up-grid{display:grid;grid-template-columns:2fr 1fr 1fr 1fr 1fr;gap:12px}
+.up-grid label{margin-bottom:12px}
+.up-grid input,.up-grid select{font-size:16px;padding:10px 12px}
+select{font:inherit;font-weight:700;color:var(--navy);border:1.5px solid var(--line);border-radius:12px;background:#fff;width:100%}
+.upload .status{margin:0;align-self:center}
+.tag{display:inline-block;margin-left:6px;padding:2px 7px;border-radius:999px;background:#efe6d6;color:#7a5a2a;font-size:11px;font-weight:700;letter-spacing:.03em;vertical-align:middle}
+.file-view{width:100%;height:80vh;border:0;border-radius:6px;background:#fff;display:block}
+.file-img{width:100%;border-radius:6px;display:block;background:#fff}
 button.btn{font:inherit;font-weight:700;border:0;border-radius:10px;padding:10px 16px;cursor:pointer;background:#6d1b27;color:#fff}
 button.ghost{background:transparent;color:var(--muted);border:1.5px solid var(--line)}
 button.small{padding:6px 10px;font-size:13px}
@@ -218,7 +284,7 @@ body.modal-open{overflow:hidden}
 
 .pdf-stage{position:fixed;left:-20000px;top:0;width:1414px;height:2000px}
 .pdf-stage .paper{transform:none}
-@media (max-width:860px){.editor{grid-template-columns:1fr}.panel{position:static}.inv{grid-template-columns:90px 1fr 110px;}.inv .date{display:none}.inv .acts{grid-column:1/-1}}
+@media (max-width:860px){.up-grid{grid-template-columns:1fr 1fr}.up-grid label:first-child{grid-column:1/-1}.editor{grid-template-columns:1fr}.panel{position:static}.inv{grid-template-columns:90px 1fr 110px;}.inv .date{display:none}.inv .acts{grid-column:1/-1}}
 </style>
 </head>
 <body>
@@ -230,7 +296,17 @@ body.modal-open{overflow:hidden}
     <div class="clients">
       <button class="client" type="button" data-client="airtiketa"><b>AIRTIKETA</b><small>Airtiketa GmbH · Faturë e re <span class="nextno"></span></small></button>
     </div>
-    <h2>Të gjitha faturat</h2>
+    <div class="list-head"><h2>Të gjitha faturat</h2><button class="btn small" type="button" id="upOpen">+ Ngarko faturë</button></div>
+    <form class="upload hidden" id="upForm">
+      <div class="up-grid">
+        <label>Skedari (PDF ose foto)<input id="upFile" type="file" accept="application/pdf,image/jpeg,image/png,image/webp"></label>
+        <label>Klienti<select id="upClient"><option value="airtiketa">AIRTIKETA</option></select></label>
+        <label>Nr. Faturës<input id="upNumber" placeholder="#05/2026" autocomplete="off"></label>
+        <label>Data<input id="upDate" type="date"></label>
+        <label>Vlera (€)<input id="upAmount" inputmode="decimal" placeholder="3.232" autocomplete="off"></label>
+      </div>
+      <div class="buttons"><button class="btn" type="submit" id="upSave">Ruaj faturën</button><button class="btn ghost" type="button" id="upCancel">Anulo</button><span class="status" id="upStatus"></span></div>
+    </form>
     <div id="list"><div class="empty">Duke i ngarkuar…</div></div>
   </div>
 
@@ -364,8 +440,8 @@ body.modal-open{overflow:hidden}
     if(!invoices.length){ $("list").innerHTML = '<div class="empty">Ende nuk ka fatura. Kliko AIRTIKETA për të krijuar të parën.</div>'; return; }
     $("list").innerHTML = invoices.map(function(inv){
       var c = CLIENTS[inv.client] || { label: inv.client };
-      return '<div class="inv" data-id="' + esc(inv.id) + '"><span class="no">' + esc(inv.number) + '</span><span>' + esc(c.label) + '</span><span class="date">' + esc(dmy(inv.date)) + '</span><span class="amt">' + esc(money(inv.amount)) + '</span>'
-        + '<span class="acts"><button class="btn ghost small" type="button" data-edit="' + esc(inv.id) + '">Edito</button><button class="btn ghost small" type="button" data-del="' + esc(inv.id) + '">Fshi</button></span></div>';
+      return '<div class="inv" data-id="' + esc(inv.id) + '"><span class="no">' + esc(inv.number) + '</span><span>' + esc(c.label) + (inv.file ? '<span class="tag">E NGARKUAR</span>' : '') + '</span><span class="date">' + esc(dmy(inv.date)) + '</span><span class="amt">' + (inv.amount ? esc(money(inv.amount)) : "—") + '</span>'
+        + '<span class="acts">' + (inv.file ? '' : '<button class="btn ghost small" type="button" data-edit="' + esc(inv.id) + '">Edito</button>') + '<button class="btn ghost small" type="button" data-del="' + esc(inv.id) + '">Fshi</button></span></div>';
     }).join("");
   }
 
@@ -416,13 +492,52 @@ body.modal-open{overflow:hidden}
   document.querySelectorAll("[data-client]").forEach(function(btn){ btn.addEventListener("click", function(){ openEditor(null, btn.getAttribute("data-client")); }); });
 
   var opened = null;
-  function openModal(inv){ opened = inv; $("mTitle").textContent = inv.number + " · " + (CLIENTS[inv.client] || {}).label; $("modal").classList.add("is-open"); document.body.classList.add("modal-open"); mount($("mPaper"), inv); }
+  function openModal(inv){
+    opened = inv; $("mTitle").textContent = inv.number + " · " + (CLIENTS[inv.client] || {}).label + (inv.file ? " · e ngarkuar" : "");
+    $("mEdit").classList.toggle("hidden", Boolean(inv.file));
+    $("mPdf").textContent = inv.file ? "Shkarko" : "Ruaj PDF";
+    $("modal").classList.add("is-open"); document.body.classList.add("modal-open");
+    if(inv.file){
+      var src = "/faturat?file=" + encodeURIComponent(inv.id);
+      $("mPaper").style.height = "auto";
+      $("mPaper").innerHTML = (inv.fileType || "").indexOf("image/") === 0 ? '<img class="file-img" src="' + src + '" alt="">' : '<iframe class="file-view" src="' + src + '" title="Fatura"></iframe>';
+    } else mount($("mPaper"), inv);
+  }
   function closeModal(){ $("modal").classList.remove("is-open"); document.body.classList.remove("modal-open"); opened = null; }
   $("mClose").addEventListener("click", closeModal);
   $("modal").addEventListener("click", function(e){ if(e.target === $("modal")) closeModal(); });
   document.addEventListener("keydown", function(e){ if(e.key === "Escape" && opened) closeModal(); });
   $("mEdit").addEventListener("click", function(){ var inv = opened; closeModal(); openEditor(inv); });
-  $("mPdf").addEventListener("click", function(){ if(opened) savePdf(opened, this, null); });
+  $("mPdf").addEventListener("click", function(){
+    if(!opened) return;
+    if(opened.file){ var a = document.createElement("a"); a.href = "/faturat?file=" + encodeURIComponent(opened.id) + "&download=1"; document.body.appendChild(a); a.click(); a.remove(); return; }
+    savePdf(opened, this, null);
+  });
+  // ---- upload older invoices
+  function showUpload(on){ $("upForm").classList.toggle("hidden", !on); $("upOpen").classList.toggle("hidden", on); if(on){ $("upStatus").textContent = ""; if(!$("upDate").value) $("upDate").value = today(); } }
+  $("upOpen").addEventListener("click", function(){ showUpload(true); $("upFile").focus(); });
+  $("upCancel").addEventListener("click", function(){ $("upForm").reset(); showUpload(false); });
+  $("upFile").addEventListener("change", function(){
+    // Guess the number from names like "05.2026_1.pdf" or "Fatura-07-2026.pdf".
+    var f = this.files[0]; if(!f || $("upNumber").value) return;
+    var m = f.name.match(/(\d{1,3})[._\- ](20\d{2})/);
+    if(m) $("upNumber").value = "#" + m[1].padStart(2, "0") + "/" + m[2];
+  });
+  $("upForm").addEventListener("submit", function(e){
+    e.preventDefault();
+    var f = $("upFile").files[0];
+    if(!f){ $("upStatus").textContent = "Zgjidh skedarin."; return; }
+    var amount = cents($("upAmount").value);
+    var data = new FormData();
+    data.append("file", f); data.append("client", $("upClient").value); data.append("number", $("upNumber").value);
+    data.append("date", $("upDate").value); data.append("amount", amount ? String(amount) : "");
+    $("upSave").disabled = true; $("upStatus").textContent = "Duke ngarkuar…";
+    fetch("/faturat?upload=1", { method: "POST", credentials: "same-origin", body: data })
+      .then(function(r){ return r.json().then(function(b){ if(!r.ok) throw new Error(b.error || ""); return b; }); })
+      .then(function(res){ setData(res); $("upForm").reset(); showUpload(false); })
+      .catch(function(err){ $("upStatus").textContent = err.message || "Ngarkimi dështoi."; })
+      .then(function(){ $("upSave").disabled = false; });
+  });
   $("list").addEventListener("click", function(e){
     var id, inv;
     var edit = e.target.closest("[data-edit]");
