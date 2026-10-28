@@ -10,7 +10,7 @@ export const runtime = "nodejs";
 
 const DATA_DIR = process.env.CALCULATOR_DATA_DIR || path.join(process.cwd(), "data", "calculator");
 const DRAFTS_FILE = path.join(DATA_DIR, "drafts.json");
-type Draft = { id: string; period: string; a: string; b: string; savedAt: string };
+type Draft = { id: string; period: string; a: string; b: string; savedAt: string; names?: string[]; snapshot?: Record<string, number> };
 let writing: Promise<unknown> = Promise.resolve();
 
 async function readDrafts(): Promise<Draft[]> {
@@ -111,7 +111,15 @@ button.ghost{background:transparent;color:var(--muted);border:1.5px solid var(--
   .inputs{grid-template-columns:1fr 1fr}.inputs label:first-child{grid-column:1/-1}
   .cols{grid-template-columns:1fr}.col{border-left:0;border-top:2px solid var(--blue)}.col:first-child{border-top:0}
 }
-@media print{body{background:#fff;padding:0}header,.actions,.inputs,.drafts{display:none}.card{box-shadow:none}}
+.modal{position:fixed;inset:0;z-index:20;display:none;align-items:flex-start;justify-content:center;overflow:auto;padding:24px 16px;background:rgba(20,4,8,.72)}
+.modal.is-open{display:flex}
+.modal .card{width:100%;max-width:900px}
+.modal-head{display:flex;justify-content:space-between;align-items:center;gap:10px;margin-bottom:6px;flex-wrap:wrap}
+.modal-head small{color:var(--muted)}
+.modal-head div{display:flex;gap:8px}
+body.modal-open{overflow:hidden}
+@media print{body{background:#fff;padding:0}header,.actions,.inputs,.drafts,.modal-head{display:none}.card{box-shadow:none}
+  body.modal-open .wrap{display:none}.modal{position:static;background:none;padding:0}}
 </style>
 </head>
 <body>
@@ -166,6 +174,16 @@ button.ghost{background:transparent;color:var(--muted);border:1.5px solid var(--
       <button type="button" onclick="window.print()">Printo / PDF</button>
     </div>
   </div>
+  <div class="modal" id="modal" role="dialog" aria-modal="true" aria-label="Drafti">
+    <div class="card">
+      <div class="modal-head"><small id="modalWhen"></small><div>
+        <button class="ghost" type="button" id="modalClose">Mbyll</button>
+        <button class="ghost" type="button" id="modalEdit">Edito</button>
+        <button type="button" onclick="window.print()">Printo / PDF</button>
+      </div></div>
+      <div class="sheet" id="modalSheet"></div>
+    </div>
+  </div>
   <section class="drafts">
     <h2>Draftet e ruajtura</h2>
     <div id="draftList"><div class="empty">Duke i ngarkuar…</div></div>
@@ -195,6 +213,23 @@ button.ghost{background:transparent;color:var(--muted);border:1.5px solid var(--
   }
   function set(id, c){ $(id).textContent = fmt(c); }
   var FIXED = 100000;
+  function compute(a, b){
+    var t = a + b, a80 = pct(a, 80), t2 = pct(t, 2), b98 = pct(b, 98), a18 = pct(a, 18);
+    return { a:a, b:b, t:t, c1p:a - a80, a80:a80, r1:a80 - FIXED, c2p:t - t2, r2:t2, c3p:b - b98, b98:b98, a18:a18, r3:b98 + a18 + FIXED };
+  }
+  function sheetHtml(period, names, v){
+    function row(op, val, cls){ return '<div class="row' + (cls ? ' ' + cls : '') + '"><span class="op">' + op + '</span><span>' + fmt(val) + '</span></div>'; }
+    function res(val){ return '<div class="row result"><span class="op"></span><span class="v">' + fmt(val) + '</span></div>'; }
+    function name(n){ return '<div class="name" style="border:0">' + esc(n) + '</div>'; }
+    var sum = v.r1 + v.r2 + v.r3;
+    return '<div class="title">' + esc(period || "—") + '</div>'
+      + '<div class="total"><div class="sum"><div>' + fmt(v.a) + '</div><div>' + fmt(v.b) + '</div></div><div class="arrow">→</div><div class="box">' + fmt(v.t) + '</div></div>'
+      + '<div class="cols">'
+      + '<div class="col">' + name(names[0]) + row("", v.a) + row("− 20%", v.c1p, "rule") + row("", v.a80) + row("− fikse", FIXED, "rule") + res(v.r1) + '</div>'
+      + '<div class="col">' + name(names[1]) + row("", v.t) + row("− 98%", v.c2p, "rule") + res(v.r2) + '</div>'
+      + '<div class="col">' + name(names[2]) + row("", v.b) + row("− 2%", v.c3p, "rule") + row("", v.b98) + row("+ 18%", v.a18) + row("+ fikse", FIXED, "rule") + res(v.r3) + '</div>'
+      + '</div><div class="check">Kontroll: ' + fmt(v.r1) + ' + ' + fmt(v.r2) + ' + ' + fmt(v.r3) + ' = <b>' + fmt(sum) + '</b> (totali ' + fmt(v.t) + (sum === v.t ? '' : ', diferenca nga rrumbullakimi ' + fmt(v.t - sum)) + ')</div>';
+  }
   function render(){
     var a = cents($("a").value), b = cents($("b").value), t = a + b;
     $("periodOut").textContent = $("period").value.trim() || "—";
@@ -238,7 +273,8 @@ button.ghost{background:transparent;color:var(--muted);border:1.5px solid var(--
     if(!cents($("a").value) && !cents($("b").value)){ status("Shkruaj vlerat para se ta ruash."); return; }
     status("Duke ruajtur…");
     fetch("/calculator", { method: "POST", credentials: "same-origin", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ id: current, period: $("period").value, a: $("a").value, b: $("b").value }) })
+      body: JSON.stringify({ id: current, period: $("period").value, a: $("a").value, b: $("b").value,
+        names: [$("n1").value, $("n2").value, $("n3").value], snapshot: compute(cents($("a").value), cents($("b").value)) }) })
       .then(function(r){ if(!r.ok) throw 0; return r.json(); })
       .then(function(res){ current = res.id; drafts = res.drafts; showDrafts(); status("U ruajt ✓"); })
       .catch(function(){ status("Ruajtja dështoi. Provo përsëri."); });
@@ -256,8 +292,26 @@ button.ghost{background:transparent;color:var(--muted);border:1.5px solid var(--
     }
     var row = e.target.closest(".draft"); if(!row) return;
     var d = drafts.find(function(x){ return x.id === row.getAttribute("data-id"); }); if(!d) return;
+    openDraft(d);
+  });
+  var opened = null;
+  function openDraft(d){
+    opened = d;
+    var snap = d.snapshot && typeof d.snapshot.t === "number" ? d.snapshot : compute(cents(d.a), cents(d.b));
+    var names = d.names && d.names.length === 3 ? d.names : [$("n1").value, $("n2").value, $("n3").value];
+    var when = new Date(d.savedAt);
+    $("modalWhen").textContent = "Ruajtur më " + [when.getDate(), when.getMonth()+1].map(function(x){ return String(x).padStart(2,"0"); }).join(".") + "." + when.getFullYear() + " · " + String(when.getHours()).padStart(2,"0") + ":" + String(when.getMinutes()).padStart(2,"0");
+    $("modalSheet").innerHTML = sheetHtml(d.period, names, snap);
+    $("modal").classList.add("is-open"); document.body.classList.add("modal-open");
+  }
+  function closeDraft(){ $("modal").classList.remove("is-open"); document.body.classList.remove("modal-open"); opened = null; }
+  $("modalClose").addEventListener("click", closeDraft);
+  $("modal").addEventListener("click", function(e){ if(e.target === $("modal")) closeDraft(); });
+  document.addEventListener("keydown", function(e){ if(e.key === "Escape" && opened) closeDraft(); });
+  $("modalEdit").addEventListener("click", function(){
+    var d = opened; if(!d) return; closeDraft();
     current = d.id; $("period").value = d.period; $("a").value = d.a; $("b").value = d.b; render(); showDrafts();
-    status("Drafti u hap. Ndryshimet ruhen mbi të njëjtin draft."); window.scrollTo({ top: 0, behavior: "smooth" });
+    status("Po e editon draftin. “Ruaj draftin” e ruan mbi të njëjtin."); window.scrollTo({ top: 0, behavior: "smooth" });
   });
   $("clear").addEventListener("click", function(){ current = null; $("a").value = ""; $("b").value = ""; $("period").value = ""; render(); showDrafts(); status(""); $("period").focus(); });
   ["n1","n2","n3"].forEach(function(id){ $(id).addEventListener("input", showDrafts); });
@@ -286,10 +340,18 @@ export async function POST(request: Request) {
   if (!sameOrigin(request)) return json({ error: "Kërkesë e pavlefshme." }, 403);
   const body = await request.json().catch(() => null) as Record<string, unknown> | null;
   if (!body) return json({ error: "Të dhëna të pavlefshme." }, 400);
+  const names = Array.isArray(body.names) ? body.names.slice(0, 3).map((name) => clean(name, 40)) : undefined;
+  // The exact numbers as shown when saved, so an opened draft looks the same even if the formulas change later.
+  const snapshot: Record<string, number> = {};
+  if (body.snapshot && typeof body.snapshot === "object") {
+    for (const [key, value] of Object.entries(body.snapshot as Record<string, unknown>).slice(0, 30)) {
+      if (/^[a-z0-9]{1,8}$/i.test(key) && typeof value === "number" && Number.isSafeInteger(value)) snapshot[key] = value;
+    }
+  }
   const draft: Draft = {
     id: clean(body.id, 64) || randomUUID(),
     period: clean(body.period, 80), a: clean(body.a, 32), b: clean(body.b, 32),
-    savedAt: new Date().toISOString(),
+    savedAt: new Date().toISOString(), names, snapshot,
   };
   const drafts = await updateDrafts((list) => [draft, ...list.filter((item) => item.id !== draft.id)]);
   return json({ id: draft.id, drafts });
