@@ -89,7 +89,7 @@ button.ghost{background:transparent;color:var(--muted);border:1.5px solid var(--
       </div>
       <div class="cols">
         <div class="col">
-          <input class="name" id="n1" value="Doka" aria-label="Emri i kolonës 1">
+          <input class="name" id="n1" value="Dukagjini" aria-label="Emri i kolonës 1">
           <div class="row"><span class="op"></span><span id="c1a">0,00 €</span></div>
           <div class="row rule"><span class="op">− 20%</span><span id="c1p">0,00 €</span></div>
           <div class="row"><span class="op"></span><span id="c1b">0,00 €</span></div>
@@ -97,13 +97,13 @@ button.ghost{background:transparent;color:var(--muted);border:1.5px solid var(--
           <div class="row result"><span class="op"></span><span class="v" id="r1">0,00 €</span></div>
         </div>
         <div class="col">
-          <input class="name" id="n2" value="Ais" aria-label="Emri i kolonës 2">
+          <input class="name" id="n2" value="Airtiketa" aria-label="Emri i kolonës 2">
           <div class="row"><span class="op"></span><span id="c2a">0,00 €</span></div>
           <div class="row rule"><span class="op">− 98%</span><span id="c2p">0,00 €</span></div>
           <div class="row result"><span class="op"></span><span class="v" id="r2">0,00 €</span></div>
         </div>
         <div class="col">
-          <input class="name" id="n3" value="Pjesa 3" aria-label="Emri i kolonës 3">
+          <input class="name" id="n3" value="Momenti" aria-label="Emri i kolonës 3">
           <div class="row"><span class="op"></span><span id="c3a">0,00 €</span></div>
           <div class="row rule"><span class="op">− 2%</span><span id="c3p">0,00 €</span></div>
           <div class="row"><span class="op"></span><span id="c3b">0,00 €</span></div>
@@ -157,9 +157,9 @@ button.ghost{background:transparent;color:var(--muted);border:1.5px solid var(--
     set("c3a", b); set("c3p", b - b98); set("c3b", b98); set("c3c", a18); var r3 = b98 + a18 + FIXED; set("r3", r3);
     var sum = r1 + t2 + r3;
     $("check").innerHTML = a || b ? "Kontroll: " + fmt(r1) + " + " + fmt(t2) + " + " + fmt(r3) + " = <b>" + fmt(sum) + "</b> (totali " + fmt(t) + (sum === t ? "" : ", diferenca nga rrumbullakimi " + fmt(t - sum)) + ")" : "";
-    try { localStorage.setItem("momenti-calc", JSON.stringify({ n1:$("n1").value, n2:$("n2").value, n3:$("n3").value })); } catch(e){}
+    try { localStorage.setItem("momenti-calc-v2", JSON.stringify({ n1:$("n1").value, n2:$("n2").value, n3:$("n3").value })); } catch(e){}
   }
-  try { var saved = JSON.parse(localStorage.getItem("momenti-calc")||"null"); if(saved){ ["n1","n2","n3"].forEach(function(k){ if(saved[k]) $(k).value = saved[k]; }); } } catch(e){}
+  try { var saved = JSON.parse(localStorage.getItem("momenti-calc-v2")||"null"); if(saved){ ["n1","n2","n3"].forEach(function(k){ if(saved[k]) $(k).value = saved[k]; }); } } catch(e){}
   ["period","a","b","n1","n2","n3"].forEach(function(id){ $(id).addEventListener("input", render); });
   $("clear").addEventListener("click", function(){ $("a").value = ""; $("b").value = ""; $("period").value = ""; render(); $("a").focus(); });
   render();
