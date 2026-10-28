@@ -1222,10 +1222,13 @@ export default function KflNativeCanvasEditor({ article, brand = "momenti", draf
         // height and padding stay identical for every word and scale exactly with any title size.
         if (highlighted) {
           // From the top of a capital letter to the bottom of g/j/p/y, so it always fits inside one line height.
-          const top = lineY - context.measureText("H").actualBoundingBoxAscent;
-          const bottom = lineY + context.measureText("gjpy").actualBoundingBoxDescent;
+          // Tighter: covers to the baseline plus 40% of the descenders.
+          const cap = context.measureText("H");
+          const top = lineY - cap.actualBoundingBoxAscent;
+          const baseline = lineY + cap.actualBoundingBoxDescent;
+          const bottom = baseline + (lineY + context.measureText("gjpy").actualBoundingBoxDescent - baseline) * 0.4;
           const padX = renderTitleSize * 0.14;
-          const padY = renderTitleSize * 0.04;
+          const padY = renderTitleSize * 0.025;
           context.fillStyle = isBallina ? "#ffffff" : "rgba(155, 24, 23, 0.70)";
           context.fillRect(groupStart - padX, top - padY, groupWidth + padX * 2, bottom - top + padY * 2);
         }
