@@ -1422,7 +1422,7 @@ export default function KflNativeCanvasEditor({ article, brand = "momenti", draf
       const seconds = (Number(response.headers.get("X-Pruna-Processing-Ms")) / 1000).toFixed(1);
       const cost = response.headers.get("X-Pruna-Reported-Cost");
       const together = extras.length ? ` · ${extras.length === 1 ? "1 foto shtesë" : `${extras.length} foto shtesë`} në të njëjtën kërkesë` : "";
-      setNotice(`Pruna ${target === 8 ? "8MP + Realism" : `${target}MP`}: ${response.headers.get("X-Pruna-Input-Resolution")} → ${response.headers.get("X-Pruna-Output-Resolution")} · ${seconds}s${together}${cost ? ` · kosto e raportuar: ${cost}` : ""}`);
+      setNotice(`Pruna ${target}MP: ${response.headers.get("X-Pruna-Input-Resolution")} → ${response.headers.get("X-Pruna-Output-Resolution")} · ${seconds}s${together}${cost ? ` · kosto e raportuar: ${cost}` : ""}`);
     } catch (error) {
       if (!controller.signal.aborted) {
         setNoticeKind("error");
@@ -1444,8 +1444,7 @@ export default function KflNativeCanvasEditor({ article, brand = "momenti", draf
     const showingEnhanced = hasResult && mainSource === pair?.enhanced;
     const busy = prunaProcessing;
     const working = prunaProcessing && prunaTarget === target;
-    // 8 = A/B test: 8 MP + Details + Realism (see the enhance-pruna route).
-    const name = target === 8 ? "8MP + Realism" : `Enhance ${target}MP`;
+    const name = `Enhance ${target}MP`;
     // First press sends one paid request. Once a result exists, the same button only
     // switches between the two saved versions locally — no new request, no credits.
     const label = working ? `${name} po përpunohet…`
@@ -1467,7 +1466,7 @@ export default function KflNativeCanvasEditor({ article, brand = "momenti", draf
       >
         {working ? (mobile ? "…" : `${name}…`)
           : mobile ? <>{<ToolIcon name="pruna" />}<span className="kfl-enhance-mp-badge">{target}</span></>
-          : <><ToolIcon name="pruna" />{hasResult ? (showingEnhanced ? `${target === 8 ? "8MP+R" : `${target}MP`}: ON` : `${target === 8 ? "8MP+R" : `${target}MP`}: OFF`) : name}</>}
+          : <><ToolIcon name="pruna" />{hasResult ? (showingEnhanced ? `${target}MP: ON` : `${target}MP: OFF`) : name}</>}
       </button>
     );
   }
