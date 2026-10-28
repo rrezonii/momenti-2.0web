@@ -1,0 +1,190 @@
+import { timingSafeEqual } from "node:crypto";
+
+// Internal split calculator for the newsroom (momenti.info/calculator), behind HTTP Basic auth.
+// Everything is computed in the browser; nothing is stored or sent anywhere.
+export const dynamic = "force-dynamic";
+
+const USER = process.env.CALCULATOR_USER?.trim() || "redaksia";
+const PASS = process.env.CALCULATOR_PASSWORD?.trim() || "genti";
+
+function same(a: string, b: string) {
+  const left = Buffer.from(a);
+  const right = Buffer.from(b);
+  return left.length === right.length && timingSafeEqual(left, right);
+}
+
+function authorized(request: Request) {
+  const header = request.headers.get("authorization") ?? "";
+  if (!header.startsWith("Basic ")) return false;
+  const decoded = Buffer.from(header.slice(6), "base64").toString("utf8");
+  const split = decoded.indexOf(":");
+  if (split < 0) return false;
+  return same(decoded.slice(0, split), USER) && same(decoded.slice(split + 1), PASS);
+}
+
+const PAGE = String.raw`<!doctype html>
+<html lang="sq">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex, nofollow">
+<title>Kalkulatori · Momenti</title>
+<style>
+:root{--ink:#22263a;--muted:#6b6f80;--line:#d9dbe6;--paper:#fbfaf6;--red:#9b1817;--blue:#1f3a8a;--bg:#2c0b11}
+*{box-sizing:border-box}
+body{margin:0;min-height:100vh;background:radial-gradient(90% 60% at 100% 0%,rgba(161,40,58,.35),transparent 65%),linear-gradient(180deg,#34101a,#2c0b11);font-family:Inter,Segoe UI,Arial,sans-serif;color:var(--ink);padding:24px 16px 48px}
+.wrap{max-width:900px;margin:0 auto}
+header{display:flex;align-items:center;justify-content:space-between;gap:12px;color:#fff4ef;margin-bottom:16px}
+header h1{margin:0;font-size:22px;font-weight:900;letter-spacing:.01em}
+header span{font-size:12px;color:#ffb4bb;letter-spacing:.08em;font-weight:600}
+.card{background:var(--paper);border-radius:18px;box-shadow:0 18px 40px rgba(18,3,6,.35);padding:22px}
+.inputs{display:grid;grid-template-columns:1.2fr 1fr 1fr;gap:14px}
+label{display:flex;flex-direction:column;gap:6px;font-size:12px;font-weight:700;color:var(--muted);letter-spacing:.04em;text-transform:uppercase}
+input{font:inherit;font-size:20px;font-weight:700;color:var(--ink);padding:12px 14px;border:1.5px solid var(--line);border-radius:12px;background:#fff;outline:none;width:100%;text-transform:none}
+input:focus{border-color:var(--blue);box-shadow:0 0 0 3px rgba(31,58,138,.12)}
+.sheet{margin-top:22px;background:repeating-linear-gradient(transparent 0 33px,var(--line) 33px 34px);border-radius:12px;padding:6px 6px 14px}
+.title{text-align:center;font-size:24px;font-weight:800;color:var(--blue);padding:4px 0 10px;border-bottom:2px solid var(--blue)}
+.total{display:flex;align-items:center;justify-content:center;flex-wrap:wrap;gap:10px 16px;padding:16px 0;font-variant-numeric:tabular-nums}
+.total .sum{font-size:18px;color:var(--blue);font-weight:700;line-height:1.35;text-align:right}
+.total .arrow{font-size:26px;color:var(--blue)}
+.box{border:2px solid var(--blue);border-radius:12px;padding:6px 14px;font-weight:900;color:var(--blue);font-size:26px}
+.cols{display:grid;grid-template-columns:repeat(3,1fr);border-top:2px solid var(--blue)}
+.col{padding:12px 14px 4px;border-left:2px solid var(--blue);font-variant-numeric:tabular-nums}
+.col:first-child{border-left:0}
+.name{width:100%;font-size:15px;font-weight:800;color:var(--red);border:0;border-bottom:1.5px dashed transparent;background:transparent;padding:2px 0;border-radius:0;text-align:center;margin-bottom:6px}
+.name:hover,.name:focus{border-bottom-color:var(--red);box-shadow:none}
+.row{display:flex;justify-content:space-between;align-items:baseline;gap:8px;padding:5px 0;font-size:17px;color:var(--blue);font-weight:600}
+.row .op{color:var(--muted);font-weight:700;min-width:58px}
+.row.rule{border-bottom:2px solid var(--blue)}
+.row.result{font-weight:900;font-size:21px;color:var(--ink)}
+.row.result .v{border:2px solid var(--blue);border-radius:10px;padding:2px 10px}
+.check{margin-top:14px;font-size:13px;color:var(--muted);text-align:center}
+.check b{color:var(--ink)}
+.actions{display:flex;justify-content:flex-end;gap:10px;margin-top:16px}
+button{font:inherit;font-weight:700;border:0;border-radius:10px;padding:10px 16px;cursor:pointer;background:#6d1b27;color:#fff}
+button.ghost{background:transparent;color:var(--muted);border:1.5px solid var(--line)}
+@media (max-width:720px){
+  .inputs{grid-template-columns:1fr 1fr}.inputs label:first-child{grid-column:1/-1}
+  .cols{grid-template-columns:1fr}.col{border-left:0;border-top:2px solid var(--blue)}.col:first-child{border-top:0}
+}
+@media print{body{background:#fff;padding:0}header,.actions,.inputs{display:none}.card{box-shadow:none}}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header><h1>Kalkulatori i ndarjes</h1><span>MOMENTI · REDAKSIA</span></header>
+  <div class="card">
+    <div class="inputs">
+      <label>Periudha<input id="period" placeholder="p.sh. Gusht – Shtator" autocomplete="off"></label>
+      <label>Vlera e parë (€)<input id="a" inputmode="decimal" placeholder="4800,91" autocomplete="off"></label>
+      <label>Vlera e dytë (€)<input id="b" inputmode="decimal" placeholder="707,85" autocomplete="off"></label>
+    </div>
+
+    <div class="sheet">
+      <div class="title" id="periodOut">—</div>
+      <div class="total">
+        <div class="sum"><div id="aOut">0,00 €</div><div id="bOut">0,00 €</div></div>
+        <div class="arrow">→</div>
+        <div class="box" id="totalOut">0,00 €</div>
+      </div>
+      <div class="cols">
+        <div class="col">
+          <input class="name" id="n1" value="Doka" aria-label="Emri i kolonës 1">
+          <div class="row"><span class="op"></span><span id="c1a">0,00 €</span></div>
+          <div class="row rule"><span class="op">− 20%</span><span id="c1p">0,00 €</span></div>
+          <div class="row"><span class="op"></span><span id="c1b">0,00 €</span></div>
+          <div class="row rule"><span class="op">− fikse</span><span>1.000,00 €</span></div>
+          <div class="row result"><span class="op"></span><span class="v" id="r1">0,00 €</span></div>
+        </div>
+        <div class="col">
+          <input class="name" id="n2" value="Ais" aria-label="Emri i kolonës 2">
+          <div class="row"><span class="op"></span><span id="c2a">0,00 €</span></div>
+          <div class="row rule"><span class="op">− 98%</span><span id="c2p">0,00 €</span></div>
+          <div class="row result"><span class="op"></span><span class="v" id="r2">0,00 €</span></div>
+        </div>
+        <div class="col">
+          <input class="name" id="n3" value="Pjesa 3" aria-label="Emri i kolonës 3">
+          <div class="row"><span class="op"></span><span id="c3a">0,00 €</span></div>
+          <div class="row rule"><span class="op">− 2%</span><span id="c3p">0,00 €</span></div>
+          <div class="row"><span class="op"></span><span id="c3b">0,00 €</span></div>
+          <div class="row"><span class="op">+ 18%</span><span id="c3c">0,00 €</span></div>
+          <div class="row rule"><span class="op">+ fikse</span><span>1.000,00 €</span></div>
+          <div class="row result"><span class="op"></span><span class="v" id="r3">0,00 €</span></div>
+        </div>
+      </div>
+      <div class="check" id="check"></div>
+    </div>
+
+    <div class="actions">
+      <button class="ghost" type="button" id="clear">Pastro</button>
+      <button type="button" onclick="window.print()">Printo / PDF</button>
+    </div>
+  </div>
+</div>
+<script>
+(function(){
+  var $ = function(id){ return document.getElementById(id); };
+  // Accepts 4800,91 · 4800.91 · 4.800,91 · 4,800.91 → cents (integer, no float drift).
+  function cents(text){
+    var s = String(text||"").replace(/[^0-9.,-]/g,"");
+    if(!s) return 0;
+    var lastDot = s.lastIndexOf("."), lastComma = s.lastIndexOf(",");
+    var dec = Math.max(lastDot, lastComma);
+    var decimals = dec >= 0 ? s.length - dec - 1 : 0;
+    var multipleDots = (s.match(/\./g)||[]).length > 1;
+    if (dec < 0 || (lastComma < 0 && (multipleDots || decimals === 3))) return Math.round(Number(s.replace(/[.,]/g,""))*100) || 0;
+    var whole = s.slice(0, dec).replace(/[.,]/g,""), frac = (s.slice(dec+1)+"00").slice(0,2);
+    return (Number(whole||0)*100 + Number(frac)) || 0;
+  }
+  // Same as in the notebook: percentages are cut to the cent (not rounded up).
+  function pct(c, p){ return Math.floor(c * p / 100); }
+  function fmt(c){
+    var neg = c < 0; c = Math.abs(c);
+    var e = Math.floor(c/100).toString().replace(/\B(?=(\d{3})+(?!\d))/g,".");
+    return (neg?"− ":"") + e + "," + String(c%100).padStart(2,"0") + " €";
+  }
+  function set(id, c){ $(id).textContent = fmt(c); }
+  var FIXED = 100000;
+  function render(){
+    var a = cents($("a").value), b = cents($("b").value), t = a + b;
+    $("periodOut").textContent = $("period").value.trim() || "—";
+    set("aOut", a); set("bOut", b); set("totalOut", t);
+    var a80 = pct(a, 80);
+    set("c1a", a); set("c1p", a - a80); set("c1b", a80); var r1 = a80 - FIXED; set("r1", r1);
+    var t2 = pct(t, 2);
+    set("c2a", t); set("c2p", t - t2); set("r2", t2);
+    var b98 = pct(b, 98), a18 = pct(a, 18);
+    set("c3a", b); set("c3p", b - b98); set("c3b", b98); set("c3c", a18); var r3 = b98 + a18 + FIXED; set("r3", r3);
+    var sum = r1 + t2 + r3;
+    $("check").innerHTML = a || b ? "Kontroll: " + fmt(r1) + " + " + fmt(t2) + " + " + fmt(r3) + " = <b>" + fmt(sum) + "</b> (totali " + fmt(t) + (sum === t ? "" : ", diferenca nga rrumbullakimi " + fmt(t - sum)) + ")" : "";
+    try { localStorage.setItem("momenti-calc", JSON.stringify({ n1:$("n1").value, n2:$("n2").value, n3:$("n3").value })); } catch(e){}
+  }
+  try { var saved = JSON.parse(localStorage.getItem("momenti-calc")||"null"); if(saved){ ["n1","n2","n3"].forEach(function(k){ if(saved[k]) $(k).value = saved[k]; }); } } catch(e){}
+  ["period","a","b","n1","n2","n3"].forEach(function(id){ $(id).addEventListener("input", render); });
+  $("clear").addEventListener("click", function(){ $("a").value = ""; $("b").value = ""; $("period").value = ""; render(); $("a").focus(); });
+  render();
+})();
+</script>
+</body>
+</html>`;
+
+export function GET(request: Request) {
+  if (!authorized(request)) {
+    return new Response("Kërkohet hyrja.", {
+      status: 401,
+      headers: {
+        "WWW-Authenticate": 'Basic realm="Momenti Kalkulatori", charset="UTF-8"',
+        "Cache-Control": "no-store",
+        "X-Robots-Tag": "noindex, nofollow",
+      },
+    });
+  }
+  return new Response(PAGE, {
+    headers: {
+      "Content-Type": "text/html; charset=utf-8",
+      "Cache-Control": "private, no-store",
+      "X-Robots-Tag": "noindex, nofollow",
+      "X-Content-Type-Options": "nosniff",
+    },
+  });
+}
