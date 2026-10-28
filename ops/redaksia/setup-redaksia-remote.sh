@@ -66,7 +66,9 @@ systemctl reload nginx
 echo "   nginx: OK"
 
 echo "== 2/3 HTTPS (Let's Encrypt)"
-RESOLVED=$(getent ahostsv4 "$DOMAIN" | awk 'NR==1{print $1}')
+# Ask a public resolver first (the server's own resolver may still cache "not found" for a while).
+RESOLVED=$(dig +short A "$DOMAIN" @8.8.8.8 2>/dev/null | tail -n1)
+[ -n "$RESOLVED" ] || RESOLVED=$(getent ahostsv4 "$DOMAIN" | awk 'NR==1{print $1}')
 if [ "$RESOLVED" != "$SERVER_IP" ]; then
   echo "   DNS per $DOMAIN ende nuk tregon $SERVER_IP (tani: ${RESOLVED:-asgje}). Shto A record ne GoDaddy dhe rinise setup-in."
 else
