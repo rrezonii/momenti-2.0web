@@ -103,7 +103,7 @@ input:focus{border-color:var(--blue);box-shadow:0 0 0 3px rgba(31,58,138,.12)}
 .draft:hover,.draft.is-open{border-color:#c9a2a7}
 .draft b{display:block;font-size:15px}.draft .tot{font-weight:900;color:var(--blue)}.draft small{color:var(--muted)}
 .draft .k{color:var(--muted);font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.04em;display:block}
-.draft button{padding:6px 10px;font-size:13px}
+.draft button{padding:6px 10px;font-size:13px}.draft .acts{display:flex;gap:6px;justify-content:flex-end}
 .empty{color:#d9c3c0;font-size:14px}
 .pdf-stage{position:fixed;left:-10000px;top:0;width:794px;padding:28px 24px;background:radial-gradient(90% 60% at 100% 0%,rgba(161,40,58,.35),transparent 65%),linear-gradient(180deg,#34101a,#2c0b11)}
 .pdf-stage .card{box-shadow:none}.pdf-meta{display:flex;flex-direction:column;align-items:flex-end;gap:4px}.pdf-meta b{color:#fff4ef;font-size:13px;font-weight:700}.pdf-stage .sheet{margin-top:0}
@@ -273,7 +273,7 @@ body.modal-open{overflow:hidden}
         + '<div><span class="k">' + esc($("n2").value) + '</span>' + fmt(r[1]) + '</div>'
         + '<div><span class="k">' + esc($("n3").value) + '</span>' + fmt(r[2]) + '</div>'
         + '<div class="tot"><span class="k">Totali</span>' + fmt(cents(d.a) + cents(d.b)) + '</div>'
-        + '<div><button class="ghost" type="button" data-del="' + esc(d.id) + '">Fshi</button></div></div>';
+        + '<div class="acts"><button class="ghost" type="button" data-edit="' + esc(d.id) + '">Edito</button><button class="ghost" type="button" data-del="' + esc(d.id) + '">Fshi</button></div></div>';
     }).join("");
   }
   function load(){
@@ -293,6 +293,11 @@ body.modal-open{overflow:hidden}
       .catch(function(){ status("Ruajtja dështoi. Provo përsëri."); });
   });
   $("draftList").addEventListener("click", function(e){
+    var edit = e.target.closest("[data-edit]");
+    if(edit){
+      var de = drafts.find(function(x){ return x.id === edit.getAttribute("data-edit"); }); if(!de) return;
+      editDraft(de); return;
+    }
     var del = e.target.closest("[data-del]");
     if(del){
       e.stopPropagation();
@@ -321,8 +326,12 @@ body.modal-open{overflow:hidden}
   $("modalClose").addEventListener("click", closeDraft);
   $("modal").addEventListener("click", function(e){ if(e.target === $("modal")) closeDraft(); });
   document.addEventListener("keydown", function(e){ if(e.key === "Escape" && opened) closeDraft(); });
+  function editDraft(d){
+    current = d.id; $("period").value = d.period; $("a").value = d.a; $("b").value = d.b; render(); showDrafts();
+    status("Po e editon draftin. “Ruaj draftin” e ruan mbi të njëjtin."); window.scrollTo({ top: 0, behavior: "smooth" }); $("a").focus({ preventScroll: true });
+  }
   $("modalEdit").addEventListener("click", function(){
-    var d = opened; if(!d) return; closeDraft();
+    var d = opened; if(!d) return; closeDraft(); editDraft(d); return;
     current = d.id; $("period").value = d.period; $("a").value = d.a; $("b").value = d.b; render(); showDrafts();
     status("Po e editon draftin. “Ruaj draftin” e ruan mbi të njëjtin."); window.scrollTo({ top: 0, behavior: "smooth" });
   });
@@ -342,7 +351,7 @@ body.modal-open{overflow:hidden}
   function savePdf(period, sheetInner, button, created){
     var label = button.textContent; button.disabled = true; button.textContent = "Duke krijuar…";
     var stage = document.createElement("div"); stage.className = "pdf-stage";
-    stage.innerHTML = '<header><h1>Kalkulatori i ndarjes</h1><div class="pdf-meta"><span>MOMENTI · REDAKSIA</span><b>Krijuar më ' + stamp(created || new Date()) + '</b></div></header><div class="card"><div class="sheet">' + sheetInner + '</div></div>';
+    stage.innerHTML = '<header><h1>Kalkulatori i ndarjes</h1><div class="pdf-meta"><span>MOMENTI · REDAKSIA</span><b>Krijuar më ' + stamp(new Date()) + '</b></div></header><div class="card"><div class="sheet">' + sheetInner + '</div></div>';
     stage.querySelectorAll("input.name").forEach(function(input, i){ var d = document.createElement("div"); d.className = "name"; d.style.border = "0"; d.textContent = $("n" + (i + 1)).value; input.replaceWith(d); });
     document.body.appendChild(stage);
     pdfLibs().then(function(){ return document.fonts ? document.fonts.ready : null; })
