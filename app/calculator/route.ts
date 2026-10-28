@@ -1,4 +1,5 @@
 import { randomUUID, timingSafeEqual } from "node:crypto";
+import { hasSession, isRedaksiaHost, loginRedirect } from "@/lib/redaksia/session";
 import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import path from "node:path";
 
@@ -48,6 +49,7 @@ function same(a: string, b: string) {
 }
 
 function authorized(request: Request) {
+  if (hasSession(request)) return true; // logged in on redaksia.momenti.info
   const header = request.headers.get("authorization") ?? "";
   if (!header.startsWith("Basic ")) return false;
   const decoded = Buffer.from(header.slice(6), "base64").toString("utf8");
@@ -137,7 +139,7 @@ body.modal-open{overflow:hidden}
 </head>
 <body>
 <div class="wrap">
-  <header><h1>Kalkulatori i ndarjes</h1><span>MOMENTI · REDAKSIA</span></header>
+  <header><h1>Kalkulatori i ndarjes</h1><span><a id="portalLink" href="/" hidden style="color:#fff4ef;text-decoration:none;margin-right:14px">← Redaksia</a>MOMENTI · REDAKSIA</span></header>
   <div class="card">
     <div class="inputs">
       <label>Periudha<input id="period" placeholder="p.sh. Gusht – Shtator" autocomplete="off"></label>
@@ -205,6 +207,7 @@ body.modal-open{overflow:hidden}
 <script>
 (function(){
   var $ = function(id){ return document.getElementById(id); };
+  if(location.hostname.indexOf("redaksia.") === 0) $("portalLink").hidden = false;
   // Accepts 4800,91 · 4800.91 · 4.800,91 · 4,800.91 → cents (integer, no float drift).
   function cents(text){
     var s = String(text||"").replace(/[^0-9.,-]/g,"");
@@ -378,7 +381,8 @@ body.modal-open{overflow:hidden}
 </body>
 </html>`;
 
-function denied() {
+function denied(request: Request) {
+  if (isRedaksiaHost(request)) return portalDenied(request);
   return new Response("Kërkohet hyrja.", {
     status: 401,
     headers: { "WWW-Authenticate": 'Basic realm="Momenti Kalkulatori", charset="UTF-8"', "Cache-Control": "no-store" },
@@ -393,7 +397,7 @@ function sameOrigin(request: Request) {
 const json = (body: unknown, status = 200) => Response.json(body, { status, headers: { "Cache-Control": "no-store", "X-Robots-Tag": "noindex, nofollow" } });
 
 export async function POST(request: Request) {
-  if (!authorized(request)) return denied();
+  if (!authorized(request)) return denied(request);
   if (!sameOrigin(request)) return json({ error: "Kërkesë e pavlefshme." }, 403);
   const body = await request.json().catch(() => null) as Record<string, unknown> | null;
   if (!body) return json({ error: "Të dhëna të pavlefshme." }, 400);
@@ -415,7 +419,7 @@ export async function POST(request: Request) {
 }
 
 export async function DELETE(request: Request) {
-  if (!authorized(request)) return denied();
+  if (!authorized(request)) return denied(request);
   if (!sameOrigin(request)) return json({ error: "Kërkesë e pavlefshme." }, 403);
   const id = new URL(request.url).searchParams.get("id") ?? "";
   const drafts = await updateDrafts((list) => list.filter((item) => item.id !== id));
@@ -423,7 +427,7 @@ export async function DELETE(request: Request) {
 }
 
 export async function GET(request: Request) {
-  if (!authorized(request)) return denied();
+  if (!authorized(request)) return denied(request);
   if (new URL(request.url).searchParams.has("drafts")) return json(await readDrafts());
   if (!authorized(request)) {
     return new Response("Kërkohet hyrja.", {
@@ -443,4 +447,11 @@ export async function GET(request: Request) {
       "X-Content-Type-Options": "nosniff",
     },
   });
+}
+
+// On redaksia.momenti.info: pages go to the login screen; data requests just get 401.
+function portalDenied(request: Request) {
+  const accept = request.headers.get("accept") ?? "";
+  if (request.method === "GET" && accept.includes("text/html")) return loginRedirect(request);
+  return Response.json({ error: "Sesioni ka përfunduar. Hyr përsëri." }, { status: 401, headers: { "Cache-Control": "no-store" } });
 }

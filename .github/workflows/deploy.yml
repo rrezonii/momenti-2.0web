@@ -11,6 +11,7 @@ on:
       - "ops/local/**"
       - "ops/github/**"
       - "ops/staging/**"
+      - "ops/redaksia/**"
       - ".github/**"
       - "**/*.md"
   workflow_dispatch:

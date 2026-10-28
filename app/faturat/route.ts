@@ -1,4 +1,5 @@
 import { randomUUID, timingSafeEqual } from "node:crypto";
+import { hasSession, isRedaksiaHost, loginRedirect } from "@/lib/redaksia/session";
 import { mkdir, readFile, rename, unlink, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { LOGO, STAMP } from "@/lib/invoices/assets";
@@ -67,6 +68,7 @@ function same(a: string, b: string) {
 }
 
 function authorized(request: Request) {
+  if (hasSession(request)) return true; // logged in on redaksia.momenti.info
   const header = request.headers.get("authorization") ?? "";
   if (!header.startsWith("Basic ")) return false;
   const decoded = Buffer.from(header.slice(6), "base64").toString("utf8");
@@ -111,10 +113,10 @@ const validAmount = (value: unknown) => typeof value === "number" && Number.isSa
 const sorted = (list: Invoice[]) => [...list].sort((a, b) => b.year - a.year || b.seq - a.seq);
 
 const json = (body: unknown, status = 200) => Response.json(body, { status, headers: { "Cache-Control": "no-store", "X-Robots-Tag": "noindex, nofollow" } });
-const denied = () => new Response("Kërkohet hyrja.", { status: 401, headers: { "WWW-Authenticate": 'Basic realm="Momenti Faturat", charset="UTF-8"', "Cache-Control": "no-store" } });
+const denied = (request: Request) => isRedaksiaHost(request) ? portalDenied(request) : new Response("Kërkohet hyrja.", { status: 401, headers: { "WWW-Authenticate": 'Basic realm="Momenti Faturat", charset="UTF-8"', "Cache-Control": "no-store" } });
 
 export async function GET(request: Request) {
-  if (!authorized(request)) return denied();
+  if (!authorized(request)) return denied(request);
   const params = new URL(request.url).searchParams;
   const fileId = params.get("file");
   if (fileId) {
@@ -139,7 +141,7 @@ export async function GET(request: Request) {
 }
 
 export async function POST(request: Request) {
-  if (!authorized(request)) return denied();
+  if (!authorized(request)) return denied(request);
   if (!sameOrigin(request)) return json({ error: "Kërkesë e pavlefshme." }, 403);
   if (new URL(request.url).searchParams.has("upload")) return upload(request);
   if (new URL(request.url).searchParams.has("client")) return clientSave(request);
@@ -250,7 +252,7 @@ async function upload(request: Request) {
 }
 
 export async function DELETE(request: Request) {
-  if (!authorized(request)) return denied();
+  if (!authorized(request)) return denied(request);
   if (!sameOrigin(request)) return json({ error: "Kërkesë e pavlefshme." }, 403);
   const id = new URL(request.url).searchParams.get("id") ?? "";
   const { list, result } = await update((current) => ({ list: current.filter((item) => item.id !== id), result: current.find((item) => item.id === id)?.file ?? null }));
@@ -391,7 +393,7 @@ body.modal-open{overflow:hidden}
 </head>
 <body>
 <div class="wrap">
-  <div class="top"><h1>Faturat · Momenti Media</h1><button class="link hidden" id="back" type="button">← Të gjitha faturat</button></div>
+  <div class="top"><h1>Faturat · Momenti Media</h1><div style="display:flex;gap:16px"><button class="link hidden" id="back" type="button">← Të gjitha faturat</button><a class="link" id="portalLink" href="/" hidden>← Redaksia</a></div></div>
 
   <div id="home">
     <div class="tabs" role="tablist">
@@ -476,6 +478,7 @@ Facebook</textarea></label>
 <script>
 (function(){
   var $ = function(id){ return document.getElementById(id); };
+  if(location.hostname.indexOf("redaksia.") === 0) $("portalLink").hidden = false;
   var LOGO = "__LOGO__", STAMP = "__STAMP__";
   var CLIENTS = {}, clientList = [];
   function lines(c){ return [c.name, c.business ? "Nr. Biznesit: " + c.business : "", c.address1, c.address2].filter(Boolean).join("\n"); }
@@ -815,3 +818,10 @@ Facebook</textarea></label>
 </script>
 </body>
 </html>`;
+
+// On redaksia.momenti.info: pages go to the login screen; data requests just get 401.
+function portalDenied(request: Request) {
+  const accept = request.headers.get("accept") ?? "";
+  if (request.method === "GET" && accept.includes("text/html")) return loginRedirect(request);
+  return Response.json({ error: "Sesioni ka përfunduar. Hyr përsëri." }, { status: 401, headers: { "Cache-Control": "no-store" } });
+}
