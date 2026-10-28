@@ -1,8 +1,42 @@
-import { timingSafeEqual } from "node:crypto";
+import { randomUUID, timingSafeEqual } from "node:crypto";
+import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
+import path from "node:path";
 
 // Internal split calculator for the newsroom (momenti.info/calculator), behind HTTP Basic auth.
-// Everything is computed in the browser; nothing is stored or sent anywhere.
+// The maths runs in the browser; saved drafts live in data/calculator/drafts.json on the server
+// (the data/ folder is kept across deploys, like the KFL drafts).
 export const dynamic = "force-dynamic";
+export const runtime = "nodejs";
+
+const DATA_DIR = process.env.CALCULATOR_DATA_DIR || path.join(process.cwd(), "data", "calculator");
+const DRAFTS_FILE = path.join(DATA_DIR, "drafts.json");
+type Draft = { id: string; period: string; a: string; b: string; savedAt: string };
+let writing: Promise<unknown> = Promise.resolve();
+
+async function readDrafts(): Promise<Draft[]> {
+  try {
+    const list = JSON.parse(await readFile(DRAFTS_FILE, "utf8"));
+    return Array.isArray(list) ? list : [];
+  } catch { return []; }
+}
+
+// Serialise writes so two saves at the same moment cannot overwrite each other.
+function updateDrafts(change: (list: Draft[]) => Draft[]) {
+  const next = writing.then(async () => {
+    const list = change(await readDrafts()).slice(0, 1000);
+    await mkdir(DATA_DIR, { recursive: true });
+    const temp = `${DRAFTS_FILE}.${process.pid}.tmp`;
+    await writeFile(temp, JSON.stringify(list, null, 1));
+    await rename(temp, DRAFTS_FILE);
+    return list;
+  });
+  writing = next.catch(() => undefined);
+  return next;
+}
+
+function clean(value: unknown, max: number) {
+  return typeof value === "string" ? value.replace(/[\u0000-\u001f]/g, "").trim().slice(0, max) : "";
+}
 
 const USER = process.env.CALCULATOR_USER?.trim() || "redaksia";
 const PASS = process.env.CALCULATOR_PASSWORD?.trim() || "genti";
@@ -60,14 +94,24 @@ input:focus{border-color:var(--blue);box-shadow:0 0 0 3px rgba(31,58,138,.12)}
 .row.result .v{border:2px solid var(--blue);border-radius:10px;padding:2px 10px}
 .check{margin-top:14px;font-size:13px;color:var(--muted);text-align:center}
 .check b{color:var(--ink)}
-.actions{display:flex;justify-content:flex-end;gap:10px;margin-top:16px}
+.actions{display:flex;justify-content:flex-end;align-items:center;gap:10px;margin-top:16px;flex-wrap:wrap}
+.status{margin-right:auto;font-size:13px;color:var(--muted)}
+.drafts{margin-top:22px}
+.drafts h2{color:#fff4ef;font-size:17px;margin:0 0 10px}
+.draft{display:grid;grid-template-columns:1.3fr repeat(3,1fr) auto;gap:10px;align-items:center;background:var(--paper);border-radius:12px;padding:12px 14px;margin-bottom:8px;font-variant-numeric:tabular-nums;font-size:14px;cursor:pointer;border:2px solid transparent}
+.draft:hover,.draft.is-open{border-color:#c9a2a7}
+.draft b{display:block;font-size:15px}.draft small{color:var(--muted)}
+.draft .k{color:var(--muted);font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.04em;display:block}
+.draft button{padding:6px 10px;font-size:13px}
+.empty{color:#d9c3c0;font-size:14px}
 button{font:inherit;font-weight:700;border:0;border-radius:10px;padding:10px 16px;cursor:pointer;background:#6d1b27;color:#fff}
 button.ghost{background:transparent;color:var(--muted);border:1.5px solid var(--line)}
 @media (max-width:720px){
+  .draft{grid-template-columns:1fr 1fr}.draft>div:first-child{grid-column:1/-1}
   .inputs{grid-template-columns:1fr 1fr}.inputs label:first-child{grid-column:1/-1}
   .cols{grid-template-columns:1fr}.col{border-left:0;border-top:2px solid var(--blue)}.col:first-child{border-top:0}
 }
-@media print{body{background:#fff;padding:0}header,.actions,.inputs{display:none}.card{box-shadow:none}}
+@media print{body{background:#fff;padding:0}header,.actions,.inputs,.drafts{display:none}.card{box-shadow:none}}
 </style>
 </head>
 <body>
@@ -76,8 +120,8 @@ button.ghost{background:transparent;color:var(--muted);border:1.5px solid var(--
   <div class="card">
     <div class="inputs">
       <label>Periudha<input id="period" placeholder="p.sh. Gusht – Shtator" autocomplete="off"></label>
-      <label>Vlera e parë (€)<input id="a" inputmode="decimal" placeholder="4800,91" autocomplete="off"></label>
-      <label>Vlera e dytë (€)<input id="b" inputmode="decimal" placeholder="707,85" autocomplete="off"></label>
+      <label>Dukagjini (€)<input id="a" inputmode="decimal" placeholder="4800,91" autocomplete="off"></label>
+      <label>Momenti (€)<input id="b" inputmode="decimal" placeholder="707,85" autocomplete="off"></label>
     </div>
 
     <div class="sheet">
@@ -116,10 +160,16 @@ button.ghost{background:transparent;color:var(--muted);border:1.5px solid var(--
     </div>
 
     <div class="actions">
-      <button class="ghost" type="button" id="clear">Pastro</button>
+      <span class="status" id="status"></span>
+      <button class="ghost" type="button" id="clear">E re</button>
+      <button type="button" id="save">Ruaj draftin</button>
       <button type="button" onclick="window.print()">Printo / PDF</button>
     </div>
   </div>
+  <section class="drafts">
+    <h2>Draftet e ruajtura</h2>
+    <div id="draftList"><div class="empty">Duke i ngarkuar…</div></div>
+  </section>
 </div>
 <script>
 (function(){
@@ -161,14 +211,100 @@ button.ghost{background:transparent;color:var(--muted);border:1.5px solid var(--
   }
   try { var saved = JSON.parse(localStorage.getItem("momenti-calc-v2")||"null"); if(saved){ ["n1","n2","n3"].forEach(function(k){ if(saved[k]) $(k).value = saved[k]; }); } } catch(e){}
   ["period","a","b","n1","n2","n3"].forEach(function(id){ $(id).addEventListener("input", render); });
-  $("clear").addEventListener("click", function(){ $("a").value = ""; $("b").value = ""; $("period").value = ""; render(); $("a").focus(); });
-  render();
+  var current = null, drafts = [];
+  function status(t){ $("status").textContent = t; }
+  function esc(t){ return String(t).replace(/[&<>"]/g, function(c){ return {"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]; }); }
+  function results(d){ var a = cents(d.a), b = cents(d.b); return [pct(a,80) - FIXED, pct(a+b,2), pct(b,98) + pct(a,18) + FIXED]; }
+  function showDrafts(){
+    if(!drafts.length){ $("draftList").innerHTML = '<div class="empty">Ende nuk ka drafte. Shkruaj vlerat dhe shtyp “Ruaj draftin”.</div>'; return; }
+    $("draftList").innerHTML = drafts.map(function(d){
+      var r = results(d), when = new Date(d.savedAt);
+      return '<div class="draft' + (d.id === current ? ' is-open' : '') + '" data-id="' + esc(d.id) + '">'
+        + '<div><b>' + esc(d.period || "Pa periudhë") + '</b><small>' + [when.getDate(), when.getMonth()+1].map(function(x){ return String(x).padStart(2,"0"); }).join(".") + "." + when.getFullYear() + " · " + String(when.getHours()).padStart(2,"0") + ":" + String(when.getMinutes()).padStart(2,"0") + '</small></div>'
+        + '<div><span class="k">' + esc($("n1").value) + '</span>' + fmt(r[0]) + '</div>'
+        + '<div><span class="k">' + esc($("n2").value) + '</span>' + fmt(r[1]) + '</div>'
+        + '<div><span class="k">' + esc($("n3").value) + '</span>' + fmt(r[2]) + '</div>'
+        + '<div><button class="ghost" type="button" data-del="' + esc(d.id) + '">Fshi</button></div></div>';
+    }).join("");
+  }
+  function load(){
+    fetch("/calculator?drafts=1", { credentials: "same-origin", cache: "no-store" })
+      .then(function(r){ if(!r.ok) throw 0; return r.json(); })
+      .then(function(list){ drafts = list; showDrafts(); })
+      .catch(function(){ $("draftList").innerHTML = '<div class="empty">Draftet nuk u ngarkuan. Rifresko faqen.</div>'; });
+  }
+  $("save").addEventListener("click", function(){
+    if(!cents($("a").value) && !cents($("b").value)){ status("Shkruaj vlerat para se ta ruash."); return; }
+    status("Duke ruajtur…");
+    fetch("/calculator", { method: "POST", credentials: "same-origin", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ id: current, period: $("period").value, a: $("a").value, b: $("b").value }) })
+      .then(function(r){ if(!r.ok) throw 0; return r.json(); })
+      .then(function(res){ current = res.id; drafts = res.drafts; showDrafts(); status("U ruajt ✓"); })
+      .catch(function(){ status("Ruajtja dështoi. Provo përsëri."); });
+  });
+  $("draftList").addEventListener("click", function(e){
+    var del = e.target.closest("[data-del]");
+    if(del){
+      e.stopPropagation();
+      if(!confirm("Ta fshij këtë draft?")) return;
+      fetch("/calculator?id=" + encodeURIComponent(del.getAttribute("data-del")), { method: "DELETE", credentials: "same-origin" })
+        .then(function(r){ if(!r.ok) throw 0; return r.json(); })
+        .then(function(res){ if(current === del.getAttribute("data-del")) current = null; drafts = res.drafts; showDrafts(); status("U fshi."); })
+        .catch(function(){ status("Fshirja dështoi."); });
+      return;
+    }
+    var row = e.target.closest(".draft"); if(!row) return;
+    var d = drafts.find(function(x){ return x.id === row.getAttribute("data-id"); }); if(!d) return;
+    current = d.id; $("period").value = d.period; $("a").value = d.a; $("b").value = d.b; render(); showDrafts();
+    status("Drafti u hap. Ndryshimet ruhen mbi të njëjtin draft."); window.scrollTo({ top: 0, behavior: "smooth" });
+  });
+  $("clear").addEventListener("click", function(){ current = null; $("a").value = ""; $("b").value = ""; $("period").value = ""; render(); showDrafts(); status(""); $("period").focus(); });
+  ["n1","n2","n3"].forEach(function(id){ $(id).addEventListener("input", showDrafts); });
+  render(); load();
 })();
 </script>
 </body>
 </html>`;
 
-export function GET(request: Request) {
+function denied() {
+  return new Response("Kërkohet hyrja.", {
+    status: 401,
+    headers: { "WWW-Authenticate": 'Basic realm="Momenti Kalkulatori", charset="UTF-8"', "Cache-Control": "no-store" },
+  });
+}
+
+function sameOrigin(request: Request) {
+  const origin = request.headers.get("origin");
+  return !origin || origin === new URL(request.url).origin || new URL(origin).host === request.headers.get("host");
+}
+
+const json = (body: unknown, status = 200) => Response.json(body, { status, headers: { "Cache-Control": "no-store", "X-Robots-Tag": "noindex, nofollow" } });
+
+export async function POST(request: Request) {
+  if (!authorized(request)) return denied();
+  if (!sameOrigin(request)) return json({ error: "Kërkesë e pavlefshme." }, 403);
+  const body = await request.json().catch(() => null) as Record<string, unknown> | null;
+  if (!body) return json({ error: "Të dhëna të pavlefshme." }, 400);
+  const draft: Draft = {
+    id: clean(body.id, 64) || randomUUID(),
+    period: clean(body.period, 80), a: clean(body.a, 32), b: clean(body.b, 32),
+    savedAt: new Date().toISOString(),
+  };
+  const drafts = await updateDrafts((list) => [draft, ...list.filter((item) => item.id !== draft.id)]);
+  return json({ id: draft.id, drafts });
+}
+
+export async function DELETE(request: Request) {
+  if (!authorized(request)) return denied();
+  if (!sameOrigin(request)) return json({ error: "Kërkesë e pavlefshme." }, 403);
+  const id = new URL(request.url).searchParams.get("id") ?? "";
+  const drafts = await updateDrafts((list) => list.filter((item) => item.id !== id));
+  return json({ drafts });
+}
+
+export async function GET(request: Request) {
+  if (!authorized(request)) return denied();
+  if (new URL(request.url).searchParams.has("drafts")) return json(await readDrafts());
   if (!authorized(request)) {
     return new Response("Kërkohet hyrja.", {
       status: 401,
