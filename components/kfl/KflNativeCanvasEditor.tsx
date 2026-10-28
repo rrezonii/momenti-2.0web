@@ -1223,7 +1223,7 @@ export default function KflNativeCanvasEditor({ article, brand = "momenti", draf
           context.fillStyle = "#ffffff";
           context.fillRect(groupStart - 6, lineY + 2, groupWidth + 12, titleLayout.lineHeight - 4);
         }
-        if (highlighted) context.fillStyle = isBallina ? BALLINA_NAVY : "rgb(228, 44, 40)";
+        if (highlighted) context.fillStyle = isBallina ? BALLINA_NAVY : "rgb(204, 22, 42)";
         else context.fillStyle = isBallina ? "#ffffff" : GOLD;
         context.fillText(groupText, groupStart, lineY, Math.max(1, TITLE_X + TITLE_WIDTH - groupStart));
         x = groupStart + groupWidth;
