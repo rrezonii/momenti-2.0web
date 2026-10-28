@@ -1218,12 +1218,18 @@ export default function KflNativeCanvasEditor({ article, brand = "momenti", draf
           wordIndex += 1;
         }
         const groupWidth = context.measureText(groupText).width;
-        // @fjalë@: Ballina keeps its white strip; KFL news posts colour only the words, in the badge-strip red (no strip).
-        if (highlighted && isBallina) {
-          context.fillStyle = "#ffffff";
-          context.fillRect(groupStart - 6, lineY + 2, groupWidth + 12, titleLayout.lineHeight - 4);
+        // @fjalë@ strip: sized from the font's own glyph box (same reference letters every time), so the
+        // height and padding stay identical for every word and scale exactly with any title size.
+        if (highlighted) {
+          // From the top of a capital letter to the bottom of g/j/p/y, so it always fits inside one line height.
+          const top = lineY - context.measureText("H").actualBoundingBoxAscent;
+          const bottom = lineY + context.measureText("gjpy").actualBoundingBoxDescent;
+          const padX = renderTitleSize * 0.14;
+          const padY = renderTitleSize * 0.04;
+          context.fillStyle = isBallina ? "#ffffff" : "rgba(155, 24, 23, 0.70)";
+          context.fillRect(groupStart - padX, top - padY, groupWidth + padX * 2, bottom - top + padY * 2);
         }
-        if (highlighted) context.fillStyle = isBallina ? BALLINA_NAVY : "rgb(204, 22, 42)";
+        if (highlighted) context.fillStyle = isBallina ? BALLINA_NAVY : GOLD;
         else context.fillStyle = isBallina ? "#ffffff" : GOLD;
         context.fillText(groupText, groupStart, lineY, Math.max(1, TITLE_X + TITLE_WIDTH - groupStart));
         x = groupStart + groupWidth;
