@@ -28,6 +28,7 @@ type PresetParams = {
   scratches?: number; // number of scratches per photo
   paper?: number; // paper fibre texture strength
   concrete?: number; // grunge strength (mostly in shadows/background)
+  mono?: number; // black & white (applied fully whenever the preset is on; intensity drives the rest)
 };
 
 /** Effect parameters per preset (names and default intensities are in texturePresets.ts). */
@@ -42,6 +43,8 @@ export const TEXTURE_PARAMS: Record<TexturePresetId, PresetParams> = {
   "old-film": { grain: { amount: 0.1, size: 1.5 }, dust: 200, scratches: 9, fade: 0.16, warmth: 0.015, vignette: 0.3 },
   paper: { paper: 0.6 },
   concrete: { concrete: 0.55 },
+  // News-magazine look: high-contrast black & white with fine, strong grain.
+  "editorial-bw": { mono: 1, contrast: 0.5, clarity: 0.45, sharpen: 0.35, grain: { amount: 0.13, size: 0.9 } },
 };
 
 export const TEXTURE_PRESETS = TEXTURE_PRESET_INFO;
@@ -267,10 +270,12 @@ export async function applyTexture(input: Buffer, options: TextureOptions): Prom
         v = 1 - p.vignette * t * 0.55 * smoothstep(0.35, 1, Math.sqrt(dx * dx + dy * dy) / maxDist);
       }
       const warm = p.warmth ? p.warmth * t : 0;
+      const m = p.mono && t > 0 ? p.mono : 0;
+      const rr = r + (l - r) * m, gg = g + (l - g) * m, bb = b + (l - b) * m;
       // Same luminance offset on R, G and B: monochromatic texture, colours preserved.
-      out[o] = Math.max(0, Math.min(255, Math.round((r + add + warm) * v * 255)));
-      out[o + 1] = Math.max(0, Math.min(255, Math.round((g + add + warm * 0.3) * v * 255)));
-      out[o + 2] = Math.max(0, Math.min(255, Math.round((b + add - warm) * v * 255)));
+      out[o] = Math.max(0, Math.min(255, Math.round((rr + add + warm) * v * 255)));
+      out[o + 1] = Math.max(0, Math.min(255, Math.round((gg + add + warm * 0.3) * v * 255)));
+      out[o + 2] = Math.max(0, Math.min(255, Math.round((bb + add - warm) * v * 255)));
       if (channels === 4) out[o + 3] = data[o + 3]; // alpha untouched
     }
   }

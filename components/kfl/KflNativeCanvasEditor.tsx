@@ -282,9 +282,13 @@ function coverLayout(image: CanvasImage, transform: MainTransform) {
 }
 
 // Line icons for the photo tools (same stroke style as the other KFL icons).
-function ToolIcon({ name }: { name: "pruna" | "filters" | "adjust" | "texture" }) {
+function ToolIcon({ name }: { name: "pruna" | "filters" | "adjust" | "texture" | "bw" }) {
   return (
     <svg className="kfl-tool-icon" viewBox="0 0 24 24" aria-hidden="true">
+      {name === "bw" && <>
+        <circle cx="12" cy="12" r="8.5" />
+        <path d="M12 3.5a8.5 8.5 0 0 1 0 17Z" fill="currentColor" />
+      </>}
       {name === "pruna" && <>
         <path d="M4.5 19.5 14 10" />
         <path d="m12.5 8.5 3 3" />
@@ -2283,6 +2287,8 @@ export default function KflNativeCanvasEditor({ article, brand = "momenti", draf
                 <button className={`kfl-enhance-toggle${selectedFilterId !== "original" ? " is-active" : ""}${filtersOpen ? " is-open" : ""}`} type="button" onClick={() => void toggleFilters()} aria-expanded={filtersOpen}><ToolIcon name="filters" />Filters</button>
                 <button className={`kfl-enhance-toggle${adjustActive ? " is-active" : ""}${adjustOpen ? " is-open" : ""}`} type="button" onClick={toggleAdjust} aria-expanded={adjustOpen}><ToolIcon name="adjust" />Rregullime</button>
                 <button className={`kfl-enhance-toggle${textureOpen ? " is-active is-open" : ""}`} type="button" onClick={toggleTexture} aria-expanded={textureOpen}><ToolIcon name="texture" />Texture</button>
+                {/* Shortcut: opens Texture with the "B&W Editorial" preset (local, no Pruna, no cost). */}
+                <button className={`kfl-enhance-toggle${textureOpen && texturePreset === "editorial-bw" ? " is-open" : ""}`} type="button" onClick={() => { if (!textureOpen) toggleTexture(); selectTexturePreset("editorial-bw"); }}><ToolIcon name="bw" />B&amp;W</button>
               </div>
               <div className="kfl-tool-footer">
                 {selectedFilterId !== "original"

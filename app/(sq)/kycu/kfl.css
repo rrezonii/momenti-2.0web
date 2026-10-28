@@ -573,7 +573,7 @@
 }
 
 /* Desktop photo tools: four equal tiles (Enhance, Filters, Rregullime, Texture) + a footer row */
-.kfl-tool-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; padding-top: 12px; }
+.kfl-tool-grid { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 8px; padding-top: 12px; }
 .kfl-editor-workspace .kfl-tool-grid .kfl-enhance-toggle {
   display: flex;
   min-height: 68px;

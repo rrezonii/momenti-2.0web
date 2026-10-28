@@ -12,6 +12,7 @@ export const TEXTURE_PRESET_INFO = [
   { id: "old-film", name: "Old Film", defaultIntensity: 30 },
   { id: "paper", name: "Paper", defaultIntensity: 20 },
   { id: "concrete", name: "Concrete", defaultIntensity: 20 },
+  { id: "editorial-bw", name: "B&W Editorial", defaultIntensity: 55 },
 ] as const;
 
 export type TexturePresetId = (typeof TEXTURE_PRESET_INFO)[number]["id"];
