@@ -79,6 +79,9 @@ export default async function Header({ initialHeadlines, locale = "sq" }: Header
               width={1080}
               height={280}
               sizes="320px"
+              // Above the fold on every page: load it at once instead of lazily, so it never pops in late.
+              loading="eager"
+              fetchPriority="high"
               className="site-logo-image"
             />
           </Link>
