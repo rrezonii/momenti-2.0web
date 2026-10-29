@@ -12,6 +12,17 @@ SITE=/etc/nginx/sites-available/momenti-redaksia
 fail() { echo; echo "XXX DESHTOI: $*"; echo "Site-i live dhe testi NUK u prekën."; exit 1; }
 case "$PORT" in 3100|3000) ;; *) fail "porti $PORT nuk lejohet";; esac
 
+# Going live (port 3000): bring the invoices made on the test site over, once, if live has none yet.
+if [ "$PORT" = "3000" ]; then
+  LIVE_INV=/var/www/momenti/data/invoices
+  TEST_INV=/var/www/momenti-test/data/invoices
+  if [ -f "$TEST_INV/invoices.json" ] && [ ! -f "$LIVE_INV/invoices.json" ]; then
+    mkdir -p /var/www/momenti/data && cp -a "$TEST_INV" "$LIVE_INV" && echo "== Faturat u kopjuan nga testi ne live: $(ls "$LIVE_INV/files" 2>/dev/null | wc -l) skedare"
+  else
+    echo "== Faturat: live i ka tashme (ose testi s'ka) - nuk kopjohet asgje"
+  fi
+fi
+
 echo "== 1/3 nginx per $DOMAIN -> 127.0.0.1:$PORT"
 PROXY="proxy_http_version 1.1;
         proxy_set_header Host \$host;
