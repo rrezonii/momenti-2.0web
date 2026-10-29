@@ -25,3 +25,7 @@ echo; echo "== WP cron / WPeMatico ne log-un e nginx (10 min e fundit)"; tail -n
 echo; echo "== A eshte faqja kryesore statike (ISR) apo dinamike?"
 DIST=$(pm2 jlist | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{const p=JSON.parse(s).find(x=>x.name==="momenti");const e=(p&&p.pm2_env)||{};console.log((e.env&&e.env.NEXT_BUILD_DIST_DIR)||e.NEXT_BUILD_DIST_DIR||".next")})')
 node -e 'const m=require(process.argv[1]+"/prerender-manifest.json");const r=Object.keys(m.routes||{});console.log("   build: "+process.argv[1]);for(const k of ["/","/lajme","/sport"]) console.log("   "+k+": "+(r.includes(k)?"ISR (cache) revalidate="+m.routes[k].initialRevalidateSeconds:"DINAMIKE (renderohet per cdo vizitor)"));' "/var/www/momenti/$DIST" 2>&1 | head -5
+node -e 'const m=require(process.argv[1]+"/prerender-manifest.json");const r=Object.keys(m.routes||{});console.log("   ISR routes ("+r.length+"): "+r.slice(0,25).join(" "));console.log("   dynamicRoutes: "+Object.keys(m.dynamicRoutes||{}).slice(0,15).join(" "));' "/var/www/momenti/$DIST" 2>&1 | head -4
+echo "   /sq/lajme headers:"; curl -s -o /dev/null -D - -H "Accept-Language: sq" http://127.0.0.1:3000/sq/lajme | grep -iE "^(x-nextjs|cache-control)" | sed 's/^/     /'
+echo "   / (pa rewrite) headers:"; curl -s -o /dev/null -D - -w "     koha %{time_total}s\n" http://127.0.0.1:3000/?lang=x | grep -iE "^(x-nextjs|cache-control)|koha" | sed 's/^/     /'
+ls "/var/www/momenti/$DIST/server/app/" 2>/dev/null | head -30 | tr '\n' ' '; echo
