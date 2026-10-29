@@ -12,6 +12,17 @@ SITE=/etc/nginx/sites-available/momenti-redaksia
 fail() { echo; echo "XXX DESHTOI: $*"; echo "Site-i live dhe testi NUK u prekën."; exit 1; }
 case "$PORT" in 3100|3000) ;; *) fail "porti $PORT nuk lejohet";; esac
 
+# Going live (port 3000): bring the invoices made on the test site over, once, if live has none yet.
+if [ "$PORT" = "3000" ]; then
+  LIVE_INV=/var/www/momenti/data/invoices
+  TEST_INV=/var/www/momenti-test/data/invoices
+  if [ -f "$TEST_INV/invoices.json" ] && [ ! -f "$LIVE_INV/invoices.json" ]; then
+    mkdir -p /var/www/momenti/data && cp -a "$TEST_INV" "$LIVE_INV" && echo "== Faturat u kopjuan nga testi ne live: $(ls "$LIVE_INV/files" 2>/dev/null | wc -l) skedare"
+  else
+    echo "== Faturat: live i ka tashme (ose testi s'ka) - nuk kopjohet asgje"
+  fi
+fi
+
 echo "== 1/3 nginx per $DOMAIN -> 127.0.0.1:$PORT"
 PROXY="proxy_http_version 1.1;
         proxy_set_header Host \$host;
@@ -66,7 +77,9 @@ systemctl reload nginx
 echo "   nginx: OK"
 
 echo "== 2/3 HTTPS (Let's Encrypt)"
-RESOLVED=$(getent ahostsv4 "$DOMAIN" | awk 'NR==1{print $1}')
+# Ask a public resolver first (the server's own resolver may still cache "not found" for a while).
+RESOLVED=$(dig +short A "$DOMAIN" @8.8.8.8 2>/dev/null | tail -n1)
+[ -n "$RESOLVED" ] || RESOLVED=$(getent ahostsv4 "$DOMAIN" | awk 'NR==1{print $1}')
 if [ "$RESOLVED" != "$SERVER_IP" ]; then
   echo "   DNS per $DOMAIN ende nuk tregon $SERVER_IP (tani: ${RESOLVED:-asgje}). Shto A record ne GoDaddy dhe rinise setup-in."
 else

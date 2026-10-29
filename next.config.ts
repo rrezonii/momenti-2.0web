@@ -5,7 +5,7 @@ const nextConfig: NextConfig = {
   // test.momenti.info runs `next dev` behind nginx. Next 16 blocks dev scripts/HMR for any
   // origin not listed here, so the page never hydrates (no client parts, e.g. the shorts video).
   // Only affects `next dev`; the live build ignores it.
-  allowedDevOrigins: ["test.momenti.info"],
+  allowedDevOrigins: ["test.momenti.info", "redaksia.momenti.info"],
   experimental: {
     inlineCss: true,
     webpackMemoryOptimizations: true,
