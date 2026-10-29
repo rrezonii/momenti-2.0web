@@ -22,3 +22,6 @@ echo; echo "== WordPress: koha deri ne bajtin e pare (3 here)"
 [ -n "$WP" ] && for i in 1 2 3; do curl -s -o /dev/null -w "   connect %{time_connect}s  ttfb %{time_starttransfer}s  total %{time_total}s  %{http_code}\n" "$WP/wp-json/wp/v2/posts?per_page=10&_fields=id"; done
 echo; echo "== php-fpm"; ps -C php-fpm8.1 --no-headers | wc -l | sed 's/^/   procese: /'; grep -E "^pm(\.max_children)? *=" /etc/php/8.1/fpm/pool.d/www.conf 2>/dev/null | sed 's/^/   /'
 echo; echo "== WP cron / WPeMatico ne log-un e nginx (10 min e fundit)"; tail -n 5000 /var/log/nginx/access.log 2>/dev/null | grep -cE "wp-cron|wpematico" | sed 's/^/   kerkesa: /'
+echo; echo "== A eshte faqja kryesore statike (ISR) apo dinamike?"
+DIST=$(pm2 jlist | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{const p=JSON.parse(s).find(x=>x.name==="momenti");const e=(p&&p.pm2_env)||{};console.log((e.env&&e.env.NEXT_BUILD_DIST_DIR)||e.NEXT_BUILD_DIST_DIR||".next")})')
+node -e 'const m=require(process.argv[1]+"/prerender-manifest.json");const r=Object.keys(m.routes||{});console.log("   build: "+process.argv[1]);for(const k of ["/","/lajme","/sport"]) console.log("   "+k+": "+(r.includes(k)?"ISR (cache) revalidate="+m.routes[k].initialRevalidateSeconds:"DINAMIKE (renderohet per cdo vizitor)"));' "/var/www/momenti/$DIST" 2>&1 | head -5

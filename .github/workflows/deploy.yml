@@ -12,6 +12,7 @@ on:
       - "ops/github/**"
       - "ops/staging/**"
       - "ops/redaksia/**"
+      - "ops/diag/**"
       - ".github/**"
       - "**/*.md"
   workflow_dispatch:
