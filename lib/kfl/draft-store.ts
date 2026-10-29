@@ -5,7 +5,15 @@ import { mkdir, readFile, readdir, rename, rm, stat, writeFile } from "node:fs/p
 import path from "node:path";
 import type { KflDraftSummary } from "@/lib/kfl/drafts";
 
-const MAX_DRAFTS = 60;
+// Drafts are kept only for today and yesterday (Kosovo time); older ones are deleted.
+// MAX_DRAFTS is just a safety limit for the disk.
+const MAX_DRAFTS = 400;
+const TIME_ZONE = "Europe/Belgrade";
+const dayKey = (time: number) => new Intl.DateTimeFormat("en-CA", { timeZone: TIME_ZONE, year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date(time));
+function keptDays() {
+  const now = Date.now();
+  return new Set([dayKey(now), dayKey(now - 24 * 60 * 60 * 1000)]);
+}
 const ROOT = process.env.KFL_DRAFTS_DIR || path.join(process.cwd(), "data", "kfl-drafts");
 const ID_PATTERN = /^[a-f0-9]{8}-[a-f0-9]{4}-[1-8][a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/i;
 
@@ -42,7 +50,14 @@ export async function listStoredDrafts(): Promise<DraftDocument[]> {
   await mkdir(ROOT, { recursive: true });
   const entries = await readdir(ROOT, { withFileTypes: true });
   const drafts = await Promise.all(entries.filter((entry) => entry.isDirectory() && validDraftId(entry.name)).map((entry) => getStoredDraft(entry.name)));
-  return drafts.filter((draft): draft is DraftDocument => Boolean(draft)).sort((a, b) => b.savedAt - a.savedAt);
+  const days = keptDays();
+  const kept: DraftDocument[] = [];
+  for (const draft of drafts) {
+    if (!draft) continue;
+    if (days.has(dayKey(draft.savedAt))) kept.push(draft);
+    else await rm(draftPath(draft.id), { recursive: true, force: true }).catch(() => undefined);
+  }
+  return kept.sort((a, b) => b.savedAt - a.savedAt);
 }
 
 export async function storeDraftFiles(document: DraftDocument, files: Array<{ name: string; data: Buffer }>) {
