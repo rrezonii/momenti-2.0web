@@ -1,0 +1,29 @@
+# Read-only server check (load, memory, pm2, response times). Actions → "Server: health" → Run workflow.
+name: "Server: health"
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+  issues: write
+jobs:
+  health:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      HOST: root@62.171.174.17
+    steps:
+      - uses: actions/checkout@v4
+      - name: Run check
+        env:
+          VPS_SSH_KEY: ${{ secrets.VPS_SSH_KEY }}
+          VPS_KNOWN_HOSTS: ${{ secrets.VPS_KNOWN_HOSTS }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          install -m 700 -d "$HOME/.ssh"
+          printf '%s\n' "$VPS_SSH_KEY" > "$HOME/.ssh/deploy_key"; chmod 600 "$HOME/.ssh/deploy_key"
+          printf '%s\n' "$VPS_KNOWN_HOSTS" > "$HOME/.ssh/known_hosts"
+          SSHOPT="-i $HOME/.ssh/deploy_key -o BatchMode=yes -o StrictHostKeyChecking=yes"
+          ssh $SSHOPT "$HOST" "bash -s" < ops/diag/health-remote.sh > /tmp/health.txt 2>&1 || true
+          rm -f "$HOME/.ssh/deploy_key"
+          { echo '```'; cat /tmp/health.txt; echo '```'; } > /tmp/report.md
+          gh issue create --repo "$GITHUB_REPOSITORY" --title "Server health" --body-file /tmp/report.md
