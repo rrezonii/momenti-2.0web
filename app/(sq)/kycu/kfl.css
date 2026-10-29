@@ -144,6 +144,13 @@
 .kfl-draft-badge-label.is-ballina { color: #0c2742; background: #fff; }
 .kfl-draft-source { margin: 5px 0 10px; color: var(--kfl-muted); font-size: 12px; line-height: 1.4; }
 .kfl-drafts-empty { padding: 24px; border: 1px solid var(--kfl-border); border-radius: 12px; color: var(--kfl-muted); background: var(--kfl-surface); text-align: center; }
+.kfl-draft-days { display: inline-flex; gap: 6px; padding: 5px; margin: 0 0 10px; border: 1px solid var(--kfl-border); border-radius: 14px; background: var(--kfl-surface); }
+.kfl-draft-days button { display: flex; align-items: center; gap: 8px; padding: 9px 16px; border: 0; border-radius: 10px; background: transparent; color: var(--kfl-muted); font: inherit; font-weight: 800; cursor: pointer; }
+.kfl-draft-days button span { font-size: 12px; font-weight: 600; opacity: .8; }
+.kfl-draft-days button b { min-width: 26px; padding: 2px 8px; border-radius: 999px; background: rgba(255,255,255,.08); font-size: 13px; text-align: center; }
+.kfl-draft-days button.is-active { color: #fff; background: var(--kfl-red); }
+.kfl-draft-days button.is-active b { background: rgba(255,255,255,.22); }
+.kfl-draft-count { margin: 0 0 16px; color: var(--kfl-muted); font-weight: 600; }
 .kfl-draft-placeholder { background: linear-gradient(135deg, #252a30, #17191c); }
 .kfl-pagination { display: flex; flex-wrap: wrap; align-items: center; justify-content: center; gap: 9px; margin-top: 30px; }
 .kfl-page-numbers { display: flex; align-items: center; gap: 5px; }
