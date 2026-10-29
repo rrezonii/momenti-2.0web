@@ -1,0 +1,21 @@
+# Measures whether the logo / page jumps while momenti.info loads (read-only). Actions → "Diag: logo shift".
+name: "Diag: logo shift"
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+  issues: write
+jobs:
+  measure:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - run: |
+          mkdir -p /tmp/diag && cp ops/diag/logo-shift.mjs /tmp/diag/ && cd /tmp/diag
+          npm init -y >/dev/null && npm i playwright@1.48.2 >/dev/null 2>&1 && npx playwright install --with-deps chromium >/dev/null 2>&1
+          node logo-shift.mjs https://momenti.info/sq > report.txt 2>&1 || true
+          { echo '```'; cat report.txt; echo '```'; } > report.md
+      - env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh issue create --repo "$GITHUB_REPOSITORY" --title "Logo shift" --body-file /tmp/diag/report.md
