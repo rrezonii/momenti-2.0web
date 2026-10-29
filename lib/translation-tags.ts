@@ -10,7 +10,9 @@ export async function getWordPressTagId(slug: string, strict = false): Promise<n
   try {
     const url = new URL(`${WORDPRESS_URL}/wp-json/wp/v2/tags`);
     url.search = new URLSearchParams({ slug, _fields: "id" }).toString();
-    const response = await fetch(url, { cache: "no-store" });
+    // Cached (not "no-store"): a no-store fetch makes every page that lists articles render
+    // from scratch for each visitor. The tag id practically never changes.
+    const response = await fetch(url, { next: { revalidate: 3600 } });
     if (!response.ok) throw new Error(`WordPress tag lookup failed: ${response.status}`);
     const tags = (await response.json()) as Array<{ id: number }>;
     const id = tags[0]?.id ?? null;
