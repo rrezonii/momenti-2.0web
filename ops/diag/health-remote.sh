@@ -16,3 +16,9 @@ for url in "http://127.0.0.1:3000/sq" "http://127.0.0.1:3000/sq/lajme" "http://1
 done
 echo; echo "== Swap / OOM ne 24 oret e fundit"; swapon --show 2>/dev/null; journalctl -k --since "24 hours ago" 2>/dev/null | grep -ci "out of memory" | sed 's/^/   OOM: /'
 echo; echo "== Build-et e vjetra .next-* ne live"; ls -d /var/www/momenti/.next* 2>/dev/null | wc -l; du -sh /var/www/momenti/.next* 2>/dev/null | sort -h | tail -5
+echo; echo "== Headers e faqes kryesore (a vjen nga cache?)"
+for i in 1 2; do curl -s -o /dev/null -D - -H "Accept-Language: sq" http://127.0.0.1:3000/sq | grep -iE "^(x-nextjs-cache|x-nextjs-prerender|cache-control|x-nextjs-stale-time)" | sed 's/^/   /'; echo "   --"; done
+echo; echo "== WordPress: koha deri ne bajtin e pare (3 here)"
+[ -n "$WP" ] && for i in 1 2 3; do curl -s -o /dev/null -w "   connect %{time_connect}s  ttfb %{time_starttransfer}s  total %{time_total}s  %{http_code}\n" "$WP/wp-json/wp/v2/posts?per_page=10&_fields=id"; done
+echo; echo "== php-fpm"; ps -C php-fpm8.1 --no-headers | wc -l | sed 's/^/   procese: /'; grep -E "^pm(\.max_children)? *=" /etc/php/8.1/fpm/pool.d/www.conf 2>/dev/null | sed 's/^/   /'
+echo; echo "== WP cron / WPeMatico ne log-un e nginx (10 min e fundit)"; tail -n 5000 /var/log/nginx/access.log 2>/dev/null | grep -cE "wp-cron|wpematico" | sed 's/^/   kerkesa: /'
