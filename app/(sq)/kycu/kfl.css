@@ -151,6 +151,12 @@
 .kfl-draft-days button.is-active { color: #fff; background: var(--kfl-red); }
 .kfl-draft-days button.is-active b { background: rgba(255,255,255,.22); }
 .kfl-draft-count { margin: 0 0 16px; color: var(--kfl-muted); font-weight: 600; }
+@media (max-width: 640px) {
+  .kfl-draft-days { display: grid; grid-template-columns: repeat(3, 1fr); width: 100%; gap: 4px; padding: 4px; }
+  .kfl-draft-days button { flex-wrap: wrap; justify-content: center; gap: 2px 6px; padding: 7px 4px; font-size: 14px; }
+  .kfl-draft-days button span { order: 3; width: 100%; text-align: center; font-size: 10.5px; }
+  .kfl-draft-days button b { min-width: 0; padding: 1px 7px; font-size: 12px; }
+}
 .kfl-draft-placeholder { background: linear-gradient(135deg, #252a30, #17191c); }
 .kfl-pagination { display: flex; flex-wrap: wrap; align-items: center; justify-content: center; gap: 9px; margin-top: 30px; }
 .kfl-page-numbers { display: flex; align-items: center; gap: 5px; }
