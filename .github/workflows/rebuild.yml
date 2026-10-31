@@ -1,0 +1,58 @@
+# Rebuilds the server after a clean Contabo reinstall: decrypts the backup artifact, uploads the code
+# (main + test) and runs ops/rebuild/provision-remote.sh. Actions → "Server: rebuild" → Run workflow.
+name: "Server: rebuild"
+on:
+  workflow_dispatch:
+    inputs:
+      backup_run_id:
+        description: "ID e run-it 'Server: backup'"
+        required: true
+permissions:
+  contents: read
+  actions: read
+  issues: write
+jobs:
+  rebuild:
+    runs-on: ubuntu-latest
+    timeout-minutes: 75
+    env:
+      HOST: root@62.171.174.17
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/download-artifact@v4
+        with:
+          name: momenti-backup-encrypted
+          run-id: ${{ inputs.backup_run_id }}
+          github-token: ${{ github.token }}
+          path: /tmp/bk
+      - name: Decrypt, upload, provision
+        env:
+          VPS_SSH_KEY: ${{ secrets.VPS_SSH_KEY }}
+        run: |
+          set -e
+          PASS=$(printf '%s' "$VPS_SSH_KEY" | sha256sum | cut -c1-64)
+          openssl enc -d -aes-256-cbc -pbkdf2 -iter 200000 -in /tmp/bk/momenti-backup.tar.gz.enc -out /tmp/backup.tar.gz -pass "pass:$PASS"
+          echo "backup sha256: $(sha256sum /tmp/backup.tar.gz | cut -c1-64)"
+          git archive --format=tar.gz -o /tmp/live.tar.gz origin/main
+          git archive --format=tar.gz -o /tmp/test.tar.gz origin/test
+          install -m 700 -d "$HOME/.ssh"
+          printf '%s\n' "$VPS_SSH_KEY" > "$HOME/.ssh/deploy_key"; chmod 600 "$HOME/.ssh/deploy_key"
+          # Freshly reinstalled server = new host key: trust it on first use and print it.
+          ssh-keyscan -t ed25519 62.171.174.17 > "$HOME/.ssh/known_hosts" 2>/dev/null
+          echo "host key: $(ssh-keygen -lf "$HOME/.ssh/known_hosts")"
+          SSHOPT="-i $HOME/.ssh/deploy_key -o BatchMode=yes -o StrictHostKeyChecking=yes -o ConnectTimeout=20 -o ServerAliveInterval=20"
+          ssh $SSHOPT "$HOST" "mkdir -p /root/rebuild && chmod 700 /root/rebuild"
+          scp $SSHOPT /tmp/backup.tar.gz /tmp/live.tar.gz /tmp/test.tar.gz ops/rebuild/provision-remote.sh "$HOST:/root/rebuild/"
+          rm -f /tmp/backup.tar.gz
+          timeout 3600 ssh $SSHOPT "$HOST" "bash /root/rebuild/provision-remote.sh" > /tmp/out.txt 2>&1 || echo "XXX provision kodi $?" >> /tmp/out.txt
+          tail -n 120 /tmp/out.txt
+      - name: Report
+        if: always()
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          { echo '```'; tail -n 150 /tmp/out.txt 2>/dev/null; echo '```'; } > /tmp/report.md
+          gh issue create --repo "$GITHUB_REPOSITORY" --title "Rebuild: ${{ job.status }}" --body-file /tmp/report.md
+          rm -f "$HOME/.ssh/deploy_key"
