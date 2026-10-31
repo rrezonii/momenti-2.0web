@@ -1,0 +1,42 @@
+# Independent scan of the whole repository (all branches + history): antivirus (ClamAV), known
+# vulnerable/malicious npm packages (npm audit + signatures, OSV), leaked secrets (gitleaks).
+name: "Security: scan repo"
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+  issues: write
+jobs:
+  scan:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Scan
+        run: |
+          set +e
+          R=/tmp/report.md; : > $R
+          echo "## 1. Antivirus ClamAV (te gjitha skedaret e te gjitha versioneve)" >> $R
+          sudo apt-get update -qq >/dev/null; sudo apt-get install -y -qq clamav >/dev/null
+          sudo systemctl stop clamav-freshclam 2>/dev/null; sudo freshclam --quiet
+          mkdir -p /tmp/all && for b in origin/main origin/test; do for c in $(git rev-list $b); do mkdir -p /tmp/all/$c && git archive $c | tar -x -C /tmp/all/$c; done; done
+          echo '```' >> $R; clamscan -r -i --no-summary /tmp/all >> $R 2>&1; echo "infektuar: $(clamscan -r -i /tmp/all 2>/dev/null | grep -E '^Infected files' )" >> $R
+          echo "versione te skanuara: $(ls /tmp/all | wc -l), skedare: $(find /tmp/all -type f | wc -l)" >> $R; echo '```' >> $R
+          echo "## 2. npm: paketat (audit + nenshkrimet e regjistrit)" >> $R
+          npm ci --ignore-scripts --no-audit --no-fund >/dev/null 2>&1
+          echo '```' >> $R; npm audit --omit=dev 2>&1 | tail -n 15 >> $R; npm audit signatures 2>&1 | tail -n 6 >> $R; echo '```' >> $R
+          echo "## 3. OSV (databaza e Google per paketa te rrezikshme/malware)" >> $R
+          curl -sSfL -o osv https://github.com/google/osv-scanner/releases/download/v1.9.2/osv-scanner_linux_amd64 && chmod +x osv
+          echo '```' >> $R; ./osv --lockfile=package-lock.json 2>&1 | tail -n 25 >> $R; echo '```' >> $R
+          echo "## 4. gitleaks (fjalekalime/celesa te rrjedhur ne histori)" >> $R
+          curl -sSfL https://github.com/gitleaks/gitleaks/releases/download/v8.21.2/gitleaks_8.21.2_linux_x64.tar.gz | tar -xz gitleaks
+          echo '```' >> $R; ./gitleaks detect --source . --log-opts="--all" --redact --no-banner 2>&1 | tail -n 20 >> $R
+          ./gitleaks detect --source . --log-opts="--all" --redact --no-banner --report-format json --report-path leaks.json >/dev/null 2>&1
+          python3 -c "import json;d=json.load(open('leaks.json'));[print(x['RuleID'],x['File'],x['StartLine']) for x in d]" >> $R 2>/dev/null; echo '```' >> $R
+          echo "## 5. Skedare qe ndryshojne veten/shkarkojne kod" >> $R
+          echo '```' >> $R; git grep -nIE "(eval|Function)\s*\(\s*(atob|Buffer\.from|unescape)|require\(['\"](child_process|vm)['\"]\)|powershell.*(iwr|Invoke-WebRequest|DownloadString)|base64 -d *\| *(ba)?sh|wget [^|]*\| *(ba)?sh" $(git for-each-ref --format='%(refname)' refs/remotes/origin) -- . ':!*.md' ':!.github/workflows/security-scan.yml' >> $R; echo "(bosh = asgje)" >> $R; echo '```' >> $R
+      - env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh issue create --repo "$GITHUB_REPOSITORY" --title "Security scan" --body-file /tmp/report.md
