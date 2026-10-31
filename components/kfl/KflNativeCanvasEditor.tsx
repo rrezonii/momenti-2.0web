@@ -1493,7 +1493,7 @@ export default function KflNativeCanvasEditor({ article, brand = "momenti", draf
         type="button" onClick={() => void bwPruna()}
         disabled={!mainImageLoaded || bwProcessing || prunaProcessing}
         aria-busy={bwProcessing} aria-pressed={has ? on : undefined} aria-label={label}
-        title={has ? "Ndërro Stil AI / origjinalen (pa kosto)" : "Stil AI gazetaresk me Pruna (përdor kredi, ~$0.01)"}
+        title={has ? "Ndërro Stil AI / origjinalen (pa kosto)" : "Stil AI: portret dramatik në sfond të zi, me Pruna (përdor kredi, ~$0.01)"}
       >
         {mobile ? (bwProcessing ? "…" : <ToolIcon name="bw" />) : <><ToolIcon name="bw" />{label}</>}
       </button>

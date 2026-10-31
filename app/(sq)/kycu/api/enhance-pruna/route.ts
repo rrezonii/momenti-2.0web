@@ -37,13 +37,11 @@ function prunaReason(value: unknown) {
 
 // "Stil AI": the Momenti editorial look made by Pruna's prompt-based editor (p-image-edit, $0.01/foto).
 // The background description stays fixed so every post gets the same recognisable backdrop.
-const BW_PROMPT = "Retouch image 1 as a dramatic, high-quality portrait photograph. Keep the photo in colour: "
-  + "slightly desaturated, natural warm skin tones, strong contrast and local clarity, crisp detail in face, hair and clothing, deep rich shadows, dramatic soft side light. "
-  + "Replace the background with a professional hand-painted canvas studio backdrop in deep navy blue (no green or teal tint), "
-  + "with soft painterly brush-stroke variations in tone, a gentle lighter glow behind the head and upper left, fading to darker blue at the edges and bottom. "
-  + "The backdrop is matte and smooth: no stars, no dots, no speckles, no sparkles, no sky, no lines. "
-  + "The person is cleanly cut out and sits sharply in front of this backdrop, with soft natural edges. "
-  + "Over the whole image add only a subtle analog film look: fine even film grain. No paper texture, no creases, no folds, no cracks, no torn or worn edges. "
+const BW_PROMPT = "Relight image 1 as a dramatic low-key editorial portrait (chiaroscuro). "
+  + "Replace the whole background with pure deep black, completely clean, with no texture, no gradient, no objects and no other people. "
+  + "Light the person with a single strong soft key light from the front-left side: the lit side of the face is bright and detailed with natural warm skin tones, "
+  + "the far side of the face, the hair and the shoulders fall gradually into deep shadow that melts into the black background. "
+  + "High contrast, rich blacks, crisp sharp detail in the eyes, skin and clothing, cinematic and serious mood, natural colours (not black and white). "
   + "Keep every person exactly the same: same face, identity, expression, pose, clothing, framing and composition. "
   + "The result must be a clean photo only: absolutely no text, no words, no letters, no titles, no captions, no watermark, no logos, no borders and no new objects anywhere in the image.";
 
@@ -154,7 +152,7 @@ export async function POST(request: Request) {
     const params = new URL(request.url).searchParams;
     const target = params.get("target") === "2" ? 2 : 4;
     const style = params.get("style") === "bw" ? "bw" : null;
-    const key = createHash("sha256").update(style ? "v6-style-editorial" : `v3-target-${target}`).update(request.headers.get("cookie") ?? "").update(input).digest("hex");
+    const key = createHash("sha256").update(style ? "v7-style-chiaroscuro" : `v3-target-${target}`).update(request.headers.get("cookie") ?? "").update(input).digest("hex");
     for (const [key, job] of jobs) if (job.expires < Date.now()) jobs.delete(key);
     let job = jobs.get(key);
     if (!job) {
