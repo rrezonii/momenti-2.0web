@@ -1,0 +1,38 @@
+# Looks up who owns an IP (country, network, abuse contact) from public registries. Actions → "Diag: IP lookup".
+name: "Diag: IP lookup"
+on:
+  workflow_dispatch:
+    inputs:
+      ips:
+        description: "IP te ndara me hapesire"
+        required: true
+permissions:
+  issues: write
+jobs:
+  lookup:
+    runs-on: ubuntu-latest
+    steps:
+      - env:
+          GH_TOKEN: ${{ github.token }}
+          IPS: ${{ inputs.ips }}
+        run: |
+          {
+          for ip in $IPS; do
+            echo "### $ip"
+            echo '```'
+            curl -s -m 20 "https://ipinfo.io/$ip/json" | grep -vE '"readme"' 
+            echo
+            curl -s -m 20 "https://rdap.db.ripe.net/ip/$ip" -H "Accept: application/rdap+json" | python3 -c 'import json,sys
+          d=json.load(sys.stdin) if True else {}
+          print("RDAP:", d.get("name"), "|", d.get("country"), "|", d.get("startAddress"),"-",d.get("endAddress"))
+          for e in d.get("entities",[]):
+              roles=",".join(e.get("roles",[]))
+              v=e.get("vcardArray",[None,[]])[1]
+              name=[x[3] for x in v if x[0]=="fn"]; mail=[x[3] for x in v if x[0]=="email"]
+              print(" ", roles, name[:1], mail[:1])' 2>/dev/null || echo "RDAP (RIPE): s'ka te dhena"
+            curl -s -m 20 "https://rdap.arin.net/registry/ip/$ip" -H "Accept: application/rdap+json" | python3 -c 'import json,sys
+          d=json.load(sys.stdin); print("RDAP ARIN:", d.get("name"), "|", d.get("handle"))' 2>/dev/null
+            echo '```'
+          done
+          } > report.md
+          gh issue create --repo "$GITHUB_REPOSITORY" --title "IP lookup" --body-file report.md
