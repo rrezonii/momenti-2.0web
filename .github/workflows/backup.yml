@@ -1,0 +1,46 @@
+# Backup before the reinstall: builds the archive on the server, encrypts it (AES-256, key derived from the
+# VPS_SSH_KEY secret, never printed) and stores it as a 90-day workflow artifact. Actions → "Server: backup".
+name: "Server: backup"
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+  issues: write
+jobs:
+  backup:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      HOST: root@62.171.174.17
+    steps:
+      - uses: actions/checkout@v4
+      - name: Make and fetch the backup
+        env:
+          VPS_SSH_KEY: ${{ secrets.VPS_SSH_KEY }}
+          VPS_KNOWN_HOSTS: ${{ secrets.VPS_KNOWN_HOSTS }}
+        run: |
+          install -m 700 -d "$HOME/.ssh"
+          printf '%s\n' "$VPS_SSH_KEY" > "$HOME/.ssh/deploy_key"; chmod 600 "$HOME/.ssh/deploy_key"
+          printf '%s\n' "$VPS_KNOWN_HOSTS" > "$HOME/.ssh/known_hosts"
+          SSHOPT="-i $HOME/.ssh/deploy_key -o BatchMode=yes -o StrictHostKeyChecking=yes -o ConnectTimeout=20 -o ServerAliveInterval=15"
+          timeout 900 ssh $SSHOPT "$HOST" "bash -s" < ops/diag/backup-remote.sh > /tmp/report.txt 2>&1
+          scp $SSHOPT "$HOST:/root/momenti-backup.tar.gz" /tmp/momenti-backup.tar.gz
+          echo "   shkarkuar: $(du -h /tmp/momenti-backup.tar.gz | cut -f1), sha256 $(sha256sum /tmp/momenti-backup.tar.gz | cut -c1-64)" >> /tmp/report.txt
+          ssh $SSHOPT "$HOST" "rm -f /root/momenti-backup.tar.gz"
+          PASS=$(printf '%s' "$VPS_SSH_KEY" | sha256sum | cut -c1-64)
+          openssl enc -aes-256-cbc -pbkdf2 -iter 200000 -salt -in /tmp/momenti-backup.tar.gz -out /tmp/momenti-backup.tar.gz.enc -pass "pass:$PASS"
+          rm -f /tmp/momenti-backup.tar.gz "$HOME/.ssh/deploy_key"
+          echo "   i enkriptuar: $(du -h /tmp/momenti-backup.tar.gz.enc | cut -f1)" >> /tmp/report.txt
+      - uses: actions/upload-artifact@v4
+        with:
+          name: momenti-backup-encrypted
+          path: /tmp/momenti-backup.tar.gz.enc
+          retention-days: 90
+          compression-level: 0
+      - name: Report
+        if: always()
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          { echo "Run: ${{ github.run_id }}"; echo '```'; cat /tmp/report.txt 2>/dev/null; echo '```'; } > /tmp/report.md
+          gh issue create --repo "$GITHUB_REPOSITORY" --title "Backup: ${{ job.status }}" --body-file /tmp/report.md

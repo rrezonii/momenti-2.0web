@@ -22,8 +22,15 @@ jobs:
           install -m 700 -d "$HOME/.ssh"
           printf '%s\n' "$VPS_SSH_KEY" > "$HOME/.ssh/deploy_key"; chmod 600 "$HOME/.ssh/deploy_key"
           printf '%s\n' "$VPS_KNOWN_HOSTS" > "$HOME/.ssh/known_hosts"
-          SSHOPT="-i $HOME/.ssh/deploy_key -o BatchMode=yes -o StrictHostKeyChecking=yes"
-          ssh $SSHOPT "$HOST" "bash -s" < ops/diag/health-remote.sh > /tmp/health.txt 2>&1 || true
+          SSHOPT="-i $HOME/.ssh/deploy_key -o BatchMode=yes -o StrictHostKeyChecking=yes -o ConnectTimeout=20 -o ServerAliveInterval=10 -o ServerAliveCountMax=3"
+          {
+            echo "== Nga jashte (GitHub), pa SSH"
+            for u in https://momenti.info/sq https://momenti.info/ https://redaksia.momenti.info/ https://test.momenti.info/; do
+              curl -s -o /dev/null -m 20 -w "   $u -> %{http_code} ne %{time_total}s\n" "$u" || echo "   $u -> NUK u pergjigj (timeout/gabim)"
+            done
+            echo
+          } > /tmp/health.txt
+          timeout 240 ssh $SSHOPT "$HOST" "bash -s" < ops/diag/health-remote.sh >> /tmp/health.txt 2>&1 || echo "SSH: deshtoi ose zgjati shume (kodi $?)" >> /tmp/health.txt
           rm -f "$HOME/.ssh/deploy_key"
           { echo '```'; cat /tmp/health.txt; echo '```'; } > /tmp/report.md
           gh issue create --repo "$GITHUB_REPOSITORY" --title "Server health" --body-file /tmp/report.md
