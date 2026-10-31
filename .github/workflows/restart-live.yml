@@ -2,6 +2,11 @@
 name: "Server: restart live"
 on:
   workflow_dispatch:
+    inputs:
+      script:
+        description: "skripti ne ops/diag (default: rinisja)"
+        required: false
+        default: "restart-live-remote.sh"
 permissions:
   contents: read
   issues: write
@@ -23,7 +28,7 @@ jobs:
           printf '%s\n' "$VPS_SSH_KEY" > "$HOME/.ssh/deploy_key"; chmod 600 "$HOME/.ssh/deploy_key"
           printf '%s\n' "$VPS_KNOWN_HOSTS" > "$HOME/.ssh/known_hosts"
           SSHOPT="-i $HOME/.ssh/deploy_key -o BatchMode=yes -o StrictHostKeyChecking=yes -o ConnectTimeout=20"
-          timeout 300 ssh $SSHOPT "$HOST" "bash -s" < ops/diag/restart-live-remote.sh > /tmp/out.txt 2>&1 || echo "SSH kodi $?" >> /tmp/out.txt
+          timeout 300 ssh $SSHOPT "$HOST" "bash -s" < "ops/diag/$(basename "${{ inputs.script || 'restart-live-remote.sh' }}")" > /tmp/out.txt 2>&1 || echo "SSH kodi $?" >> /tmp/out.txt
           rm -f "$HOME/.ssh/deploy_key"
           sed -E 's/(apikey|key|token|password)=[^ &]+/\1=***/gi' /tmp/out.txt | { echo '```'; cat; echo '```'; } > /tmp/report.md
-          gh issue create --repo "$GITHUB_REPOSITORY" --title "Restart live" --body-file /tmp/report.md
+          gh issue create --repo "$GITHUB_REPOSITORY" --title "Server: ${{ inputs.script || 'restart-live-remote.sh' }}" --body-file /tmp/report.md
